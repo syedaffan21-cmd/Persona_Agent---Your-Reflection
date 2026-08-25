@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Persona Twin</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden">
+
+    <aside class="w-72 bg-slate-950 border-r border-slate-800 flex flex-col justify-between">
+        <div>
+            <div class="p-4 border-b border-slate-800">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Persona</span>
+                    <button onclick="openPersonaModal()" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                        <i class="fa-solid fa-plus"></i> New Persona
+                    </button>
+                </div>
+                <select id="personaSelect" onchange="changePersona(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <option value="My Personal Twin">My Personal Twin</option>
+                </select>
+            </div>
+
+            <div class="p-4">
+                <button onclick="startNewChat()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center justify-center gap-2 transition">
+                    <i class="fa-solid fa-plus"></i> New Chat
+                </button>
+            </div>
+
+            <div class="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">Chat History</div>
+            <div id="chatHistoryList" class="overflow-y-auto px-2 space-y-1 h-[calc(100vh-280px)]"></div>
+        </div>
+
+        <div class="p-4 border-t border-slate-800 flex items-center justify-between text-sm text-slate-400">
+            <span class="flex items-center gap-2"><i class="fa-solid fa-circle text-emerald-400 text-xs"></i> Online</span>
+            <span class="text-xs text-slate-500">v2.0</span>
+        </div>
+    </aside>
+
+    <div class="flex-1 flex flex-col h-full bg-slate-900">
+        
+        <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 p-4 flex justify-between items-center">
+            <h1 id="activeChatTitle" class="text-base font-semibold text-slate-200">New Conversation</h1>
+            <div class="text-xs text-slate-400 flex items-center gap-2">
+                <span>Status:</span> <span id="status" class="text-emerald-400 font-medium">Connected</span>
+            </div>
+        </header>
+
+        <div id="chatWindow" class="flex-1 overflow-y-auto p-6 space-y-6"></div>
+
+        <div id="uploadStatus" class="px-6 text-xs text-slate-400 h-5"></div>
+
+        <div class="p-4 bg-slate-900 border-t border-slate-800">
+            <div class="flex items-center gap-2 max-w-4xl mx-auto bg-slate-800/80 border border-slate-700/80 rounded-2xl px-3 py-2 shadow-lg focus-within:border-indigo-500 transition">
+                
+                <button onclick="document.getElementById('fileInput').click()" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Upload Document">
+                    <i class="fa-solid fa-paperclip text-lg"></i>
+                </button>
+                <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this)">
+
+                <button onclick="toggleVoiceInput()" id="voiceBtn" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Voice Input">
+                    <i class="fa-solid fa-microphone text-lg"></i>
+                </button>
+
+                <input type="text" id="userInput" placeholder="Type a message to your twin..." class="flex-1 bg-transparent border-none px-2 py-2 text-sm text-slate-100 focus:outline-none" onkeypress="handleKeyPress(event)">
+
+                <button onclick="sendMessage(false)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="personaModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md p-6 rounded-2xl shadow-2xl space-y-4">
+            <h2 class="text-lg font-bold text-slate-100">Create & Train New Persona</h2>
+            <p class="text-xs text-slate-400">Add a name and paste multiple profile links to train your clone.</p>
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Persona Name</label>
+                    <input type="text" id="newPersonaName" placeholder="e.g., Alex, Jordan" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Train via Social Links (LinkedIn, GitHub, etc. - multiple allowed)</label>
+                    <textarea id="socialProfileUrls" rows="3" placeholder="Paste multiple links separated by commas, spaces, or new lines..." class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <button onclick="closePersonaModal()" class="px-4 py-2 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300">Cancel</button>
+                <button onclick="saveNewPersona()" class="px-4 py-2 rounded-xl text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Create & Train</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allPersonaChats = JSON.parse(localStorage.getItem("persona_chats_map")) || {
+            "My Personal Twin": [
+                { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
+            ]
+        };
+
+        let savedPersonas = JSON.parse(localStorage.getItem("persona_list")) || ["My Personal Twin"];
+        let currentPersona = localStorage.getItem("persona_active") || "My Personal Twin";
+
+        if (!allPersonaChats[currentPersona]) {
+            allPersonaChats[currentPersona] = [
+                { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
+            ];
+        }
+
+        let currentChatId = parseInt(localStorage.getItem(`persona_current_chat_${currentPersona}`)) || allPersonaChats[currentPersona][0].id;
+
+        function initPersonas() {
+            const select = document.getElementById("personaSelect");
+            select.innerHTML = "";
+            savedPersonas.forEach(pName => {
+                const option = document.createElement("option");
+                option.value = pName;
+                option.text = pName;
+                if (pName === currentPersona) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        function changePersona(val) {
+            currentPersona = val;
+            localStorage.setItem("persona_active", val);
+
+            if (!allPersonaChats[currentPersona] || allPersonaChats[currentPersona].length === 0) {
+                allPersonaChats[currentPersona] = [
+                    { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
+                ];
+            }
+
+            currentChatId = parseInt(localStorage.getItem(`persona_current_chat_${currentPersona}`)) || allPersonaChats[currentPersona][0].id;
+            
+            saveToStorage();
+            renderChatHistory();
+            renderCurrentChatMessages();
+        }
+
+        function saveToStorage() {
+            localStorage.setItem("persona_chats_map", JSON.stringify(allPersonaChats));
+            localStorage.setItem(`persona_current_chat_${currentPersona}`, currentChatId);
+            localStorage.setItem("persona_list", JSON.stringify(savedPersonas));
+            localStorage.setItem("persona_active", currentPersona);
+        }
+
+        function getCurrentChats() {
+            if (!allPersonaChats[currentPersona]) {
+                allPersonaChats[currentPersona] = [
+                    { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
+                ];
+            }
+            return allPersonaChats[currentPersona];
+        }
+
+        function renderChatHistory() {
+            const listEl = document.getElementById("chatHistoryList");
+            listEl.innerHTML = "";
+            const chats = getCurrentChats();
+            const sortedChats = [...chats].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+            sortedChats.forEach(chat => {
+                const isActive = chat.id === currentChatId;
+                const div = document.createElement("div");
+                div.className = `group flex items-center justify-between px-3 py-2 rounded-xl text-sm cursor-pointer transition ${isActive ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`;
+                div.innerHTML = `
+                    <div class="truncate flex-1 mr-2" onclick="switchChat(${chat.id})">
+                        <i class="fa-regular fa-message mr-2 text-xs"></i> <span>${chat.title}</span>
+                    </div>
+                    <div class="hidden group-hover:flex items-center gap-1.5 text-xs">
+                        <button onclick="event.stopPropagation(); togglePin(${chat.id})" class="${chat.pinned ? 'text-amber-400' : 'text-slate-500'} hover:text-slate-200" title="Pin">
+                            <i class="fa-solid fa-thumbtack"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); deleteChat(${chat.id})" class="text-slate-500 hover:text-rose-400" title="Delete">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                listEl.appendChild(div);
+            });
+        }
+
+        function renderCurrentChatMessages() {
+            const chats = getCurrentChats();
+            const chat = chats.find(c => c.id === currentChatId) || chats[0];
+            if (chat) currentChatId = chat.id;
+
+            const chatWindow = document.getElementById("chatWindow");
+            chatWindow.innerHTML = "";
+
+            if (!chat || !chat.messages || chat.messages.length === 0) {
+                chatWindow.innerHTML = `
+                    <div class="flex justify-start">
+                        <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed shadow-sm text-slate-200">
+                            Hey! I'm your Persona Twin (${currentPersona}). Drop your documents or social links to train me, or start chatting below.
+                        </div>
+                    </div>
+                `;
+                document.getElementById("activeChatTitle").innerText = chat ? chat.title : "New Conversation";
+                return;
+            }
+
+            document.getElementById("activeChatTitle").innerText = chat.title;
+
+            chat.messages.forEach(msg => {
+                if (msg.sender === "user") {
+                    chatWindow.innerHTML += `
+                        <div class="flex justify-end">
+                            <div class="bg-indigo-600 text-white rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed shadow-md">${msg.text}</div>
+                        </div>
+                    `;
+                } else {
+                    const safeText = msg.text.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                    chatWindow.innerHTML += `
+                        <div class="flex justify-start items-end gap-2">
+                            <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed text-slate-200 shadow-sm">${msg.text}</div>
+                            <button onclick="speakText('${safeText}')" class="text-slate-400 hover:text-indigo-400 p-1.5 transition mb-1" title="Read Aloud">
+                                <i class="fa-solid fa-volume-high text-xs"></i>
+                            </button>
+                        </div>
+                    `;
+                }
+            });
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function speakText(text) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(v => v.name.includes('Natural') || v.name.includes('Google') || v.lang.includes('en-US'));
+            if (preferredVoice) utterance.voice = preferredVoice;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function startNewChat() {
+            let chats = getCurrentChats();
+            const newId = Date.now();
+            chats.unshift({ id: newId, title: `${currentPersona} Chat`, pinned: false, messages: [] });
+            currentChatId = newId;
+            saveToStorage();
+            renderChatHistory();
+            renderCurrentChatMessages();
+        }
+
+        function switchChat(id) {
+            currentChatId = id;
+            saveToStorage();
+            renderChatHistory();
+            renderCurrentChatMessages();
+        }
+
+        function togglePin(id) {
+            let chats = getCurrentChats();
+            const chat = chats.find(c => c.id === id);
+            if (chat) chat.pinned = !chat.pinned;
+            saveToStorage();
+            renderChatHistory();
+        }
+
+        function deleteChat(id) {
+            let chats = getCurrentChats();
+            if (chats.length <= 1) {
+                alert("You must keep at least one chat for this persona.");
+                return;
+            }
+            allPersonaChats[currentPersona] = chats.filter(c => c.id !== id);
+            saveToStorage();
+            if (currentChatId === id) {
+                currentChatId = allPersonaChats[currentPersona][0].id;
+            }
+            renderChatHistory();
+            renderCurrentChatMessages();
+        }
+
+        function openPersonaModal() {
+            document.getElementById("personaModal").classList.remove("hidden");
+        }
+
+        function closePersonaModal() {
+            document.getElementById("personaModal").classList.add("hidden");
+        }
+
+        async function saveNewPersona() {
+            const name = document.getElementById("newPersonaName").value.trim();
+            const socialUrlsText = document.getElementById("socialProfileUrls").value.trim();
+            if (!name) return alert("Please enter a persona name.");
+
+            const socialUrls = socialUrlsText.split(/[\s,]+/).filter(url => url.length > 0);
+
+            closePersonaModal();
+            const statusEl = document.getElementById("uploadStatus");
+            statusEl.innerText = `Training persona '${name}' with multiple links...`;
+
+            try {
+                const response = await fetch("http://localhost:8000/train-persona", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name, social_urls: socialUrls })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    if (!savedPersonas.includes(name)) {
+                        savedPersonas.push(name);
+                    }
+                    if (!allPersonaChats[name]) {
+                        allPersonaChats[name] = [
+                            { id: Date.now(), title: `${name}'s First Chat`, pinned: false, messages: [] }
+                        ];
+                    }
+                    currentPersona = name;
+                    initPersonas();
+                    document.getElementById("personaSelect").value = name;
+                    currentChatId = allPersonaChats[name][0].id;
+                    saveToStorage();
+                    renderChatHistory();
+                    renderCurrentChatMessages();
+
+                    statusEl.innerText = `Success! Persona '${name}' created and selected.`;
+                    statusEl.className = "px-6 text-xs text-emerald-400 h-5";
+                } else {
+                    statusEl.innerText = `Error: ${data.detail}`;
+                    statusEl.className = "px-6 text-xs text-rose-400 h-5";
+                }
+            } catch (err) {
+                statusEl.innerText = "Failed to connect to backend training service.";
+                statusEl.className = "px-6 text-xs text-rose-400 h-5";
+            }
+        }
+
+        async function uploadFile(input) {
+            if (!input.files || input.files.length === 0) return;
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const statusEl = document.getElementById("uploadStatus");
+            statusEl.innerText = `Uploading and processing ${file.name}...`;
+
+            try {
+                const response = await fetch("http://localhost:8000/ingest", { method: "POST", body: formData });
+                const data = await response.json();
+                if (response.ok) {
+                    statusEl.innerText = `Success! Stored ${data.chunks_stored} chunks into vector memory.`;
+                    statusEl.className = "px-6 text-xs text-emerald-400 h-5";
+                } else {
+                    statusEl.innerText = `Error: ${data.detail}`;
+                    statusEl.className = "px-6 text-xs text-rose-400 h-5";
+                }
+            } catch (err) {
+                statusEl.innerText = "Failed to connect to FastAPI backend.";
+                statusEl.className = "px-6 text-xs text-rose-400 h-5";
+            }
+        }
+
+        function toggleVoiceInput() {
+            const sampleVoicePrompt = prompt("Simulate Voice Input: Type what you want to say out loud:");
+            if (sampleVoicePrompt) {
+                document.getElementById("userInput").value = sampleVoicePrompt;
+                sendMessage(true);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === "Enter") {
+                sendMessage(false);
+            }
+        }
+
+        async function sendMessage(isVoiceInput) {
+            const input = document.getElementById("userInput");
+            const message = input.value.trim();
+            if (!message) return;
+
+            let chats = getCurrentChats();
+            let chat = chats.find(c => c.id === currentChatId);
+            if (!chat) {
+                chat = chats[0];
+                currentChatId = chat.id;
+            }
+
+            if (chat.messages.length === 0 && chat.title.includes("Chat")) {
+                chat.title = message.length > 20 ? message.substring(0, 20) + "..." : message;
+            }
+
+            if (!chat.messages) chat.messages = [];
+            chat.messages.push({ sender: "user", text: message });
+            saveToStorage();
+            renderChatHistory();
+            renderCurrentChatMessages();
+            input.value = "";
+
+            const chatWindow = document.getElementById("chatWindow");
+            const loadingId = "loading_" + Date.now();
+            chatWindow.innerHTML += `
+                <div id="${loadingId}" class="flex justify-start">
+                    <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed text-slate-400 shadow-sm">
+                        Thinking...
+                    </div>
+                </div>
+            `;
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+
+            try {
+                const response = await fetch("http://localhost:8000/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        message: message,
+                        persona: currentPersona
+                    })
+                });
+
+                const data = await response.json();
+                document.getElementById(loadingId)?.remove();
+
+                chat.messages.push({ sender: "bot", text: data.response });
+                saveToStorage();
+                renderCurrentChatMessages();
+
+                if (isVoiceInput) {
+                    speakText(data.response);
+                }
+
+            } catch (err) {
+                document.getElementById(loadingId)?.remove();
+                const errText = "Failed to reach backend server.";
+                chat.messages.push({ sender: "bot", text: errText });
+                saveToStorage();
+                renderCurrentChatMessages();
+                if (isVoiceInput) speakText(errText);
+            }
+        }
+
+        initPersonas();
+        renderChatHistory();
+        renderCurrentChatMessages();
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+sentence-transformers
+qdrant-client
+neo4j
+python-multipart
+pypdf
+openai
