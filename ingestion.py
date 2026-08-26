@@ -9,6 +9,8 @@ model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def extract_text_from_file(file_path: str) -> str:
     text = ""
+    if not file_path:
+        return text
     if file_path.endswith(".pdf"):
         reader = PdfReader(file_path)
         for page in reader.pages:
@@ -18,47 +20,38 @@ def extract_text_from_file(file_path: str) -> str:
     elif file_path.endswith(".txt") or file_path.endswith(".md"):
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
-            
-    if re.search(r'\b\w \w \w\b', text):
-        text = re.sub(r'(?<!^)(?<!\s)\s(?!\s)', '', text)
-        
     return text
 
-def process_and_store_document(file_path: str):
-    raw_text = extract_text_from_file(file_path)
+def process_and_store_document(file_path: str = None, persona: str = "My Personal Twin", direct_text: str = None):
+    raw_text = ""
+    if direct_text:
+        raw_text = direct_text
+    elif file_path:
+        raw_text = extract_text_from_file(file_path)
+        
     if not raw_text:
         return 0
     
     init_vector_db()
     
-    # Intelligently split text by sections if present, otherwise chunk normally
     chunks = []
-    if "Project" in raw_text or "PROJECT" in raw_text:
-        # Split resume into logical sections
-        parts = re.split(r'(Projects|EXPERIENCE|Education|Skills)', raw_text, flags=re.IGNORECASE)
-        current_header = "General"
-        for part in parts:
-            if part.lower() in ["projects", "experience", "education", "skills"]:
-                current_header = part
-            elif len(part.strip()) > 30:
-                chunks.append(f"[{current_header}] {part.strip()}")
-    
-    # Fallback standard chunking if section splitting yielded nothing
-    if not chunks:
-        words = raw_text.split()
-        for i in range(0, len(words), 300):
-            chunks.append(" ".join(words[i:i + 300]))
+    words = raw_text.split()
+    for i in range(0, len(words), 300):
+        chunks.append(" ".join(words[i:i + 300]))
 
     embeddings = model.encode(chunks).tolist()
     
+    source_name = os.path.basename(file_path) if file_path else f"{persona}_profile"
+    
     points = []
     for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-        point_id = hash(f"{file_path}_{idx}") & 0x7FFFFFFF
+        point_id = hash(f"{source_name}_{idx}_{persona}") & 0x7FFFFFFF
         points.append(
             PointStruct(
                 id=point_id,
                 vector=embedding,
-                payload={"text": chunk, "source": os.path.basename(file_path)}
+                # Store the persona tag in the payload!
+                payload={"text": chunk, "source": source_name, "persona": persona}
             )
         )
     

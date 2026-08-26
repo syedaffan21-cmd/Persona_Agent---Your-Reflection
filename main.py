@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 from typing import List
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 from ingestion import process_and_store_document
 from graph_db import graph_db
 from vector_db import client as db_client, COLLECTION_NAME
- 
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+import pypdf
+import requests
 
 load_dotenv()
 
@@ -35,10 +37,6 @@ deepseek_client = OpenAI(
     base_url="https://openrouter.ai/api/v1"
 )
 
-# NOTE: there is only ONE Neo4j driver now - the one owned by graph_db
-# (see graph_db.py). Do not create a second driver here; two independent
-# drivers made failures easy to miss because one could connect while the
-# other silently failed.
 GRAPH_USER_NODE = os.getenv("GRAPH_USER_NODE", "Affan Syed")
 
 class ChatRequest(BaseModel):
@@ -49,6 +47,26 @@ class PersonaTrainRequest(BaseModel):
     name: str
     social_urls: List[str] = []
 
+def extract_text_from_file(file_path: str, filename: str) -> str:
+    """Extracts text content reliably based on file extension (supports PDF and TXT)."""
+    text_content = ""
+    ext = filename.lower().split(".")[-1]
+    
+    try:
+        if ext == "pdf":
+            reader = pypdf.PdfReader(file_path)
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text_content += extracted + "\n"
+        else:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                text_content = f.read()
+    except Exception as e:
+        print(f"Error reading file {filename}: {e}")
+        
+    return text_content.strip()
+
 def extract_facts_with_llm(text_content: str) -> list[dict]:
     """
     Uses the LLM to dynamically pull (relation, target) facts out of ANY
@@ -56,7 +74,6 @@ def extract_facts_with_llm(text_content: str) -> list[dict]:
     list of {"relation": "...", "target": "..."} dicts describing edges
     from the central user node.
     """
-    # Keep the prompt payload bounded - the graph doesn't need the whole document
     excerpt = text_content[:6000]
 
     extraction_prompt = (
@@ -84,7 +101,6 @@ def extract_facts_with_llm(text_content: str) -> list[dict]:
             stream=False
         )
         raw = response.choices[0].message.content.strip()
-        # Strip accidental markdown fences if the model adds them anyway
         if raw.startswith("```"):
             raw = raw.strip("`")
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw
@@ -99,8 +115,6 @@ def extract_facts_with_llm(text_content: str) -> list[dict]:
         for f in facts:
             relation = str(f.get("relation", "")).strip().upper().replace(" ", "_")
             target = str(f.get("target", "")).strip()
-            # Neo4j relationship types can't be parameterized, so only allow
-            # safe characters here to avoid Cypher injection via the LLM output
             if relation and target and relation.replace("_", "").isalnum():
                 cleaned.append({"relation": relation, "target": target})
         return cleaned
@@ -109,62 +123,67 @@ def extract_facts_with_llm(text_content: str) -> list[dict]:
         return []
 
 
-def save_profile_text_to_neo4j(filename: str, text_content: str) -> dict:
+def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -> dict:
     """Dynamically extracts entities/relationships from uploaded text and
-    writes them into Neo4j so the graph actually reflects file content,
-    instead of only matching a hardcoded keyword list."""
+    writes them into Neo4j tagged specifically to the target persona."""
     if not graph_db.driver:
         raise RuntimeError(
             "Neo4j driver is not connected (check Aura instance is running "
             "and NEO4J_URI/NEO4J_PASSWORD are correct)"
         )
 
+    # Clean and normalize persona name to prevent grouping errors
+    clean_persona = persona.strip() if persona else "My Personal Twin"
+
     facts = extract_facts_with_llm(text_content)
 
-    with graph_db.driver.session(database="neo4j") as session:
+    with graph_db.driver.session() as session:
         session.run(
             "MERGE (u:Entity {name: $uname}) SET u.type = 'User'",
-            uname=GRAPH_USER_NODE
+            uname=clean_persona
         )
 
         for fact in facts:
-            graph_db.add_fact(GRAPH_USER_NODE, fact["relation"], fact["target"])
+            # Pass the cleaned persona name to graph_db.add_fact
+            graph_db.add_fact(clean_persona, fact["relation"], fact["target"])
 
-        # Track the uploaded file node and link it to the user
         session.run(
             """
             MATCH (u:Entity {name: $uname})
             MERGE (d:Document {name: $fname})
             MERGE (u)-[:UPLOADED]->(d)
             """,
-            uname=GRAPH_USER_NODE, fname=filename
+            uname=clean_persona, fname=filename
         )
 
-    print(f"Mapped {len(facts)} fact(s) from '{filename}' into Neo4j graph.")
+    print(f"Mapped {len(facts)} fact(s) from '{filename}' into Neo4j graph for persona '{clean_persona}'.")
     return {"facts_added": len(facts), "facts": facts}
-
 @app.post("/ingest")
-async def ingest_file(file: UploadFile = File(...)):
+async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Personal Twin")):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     try:
         contents = await file.read()
-        text_data = contents.decode("utf-8", errors="ignore")
         
         with open(file_path, "wb") as buffer:
             buffer.write(contents)
+            
+        # Extract text correctly supporting both PDF and TXT files
+        text_data = extract_text_from_file(file_path, file.filename)
         
-        chunk_count = process_and_store_document(file_path)
+        if not text_data:
+            raise HTTPException(status_code=400, detail="Could not extract text from file or file is empty")
+        
+        # Pass active persona to ingestion so vectors get tagged properly
+        chunk_count = process_and_store_document(file_path, persona=persona)
         if chunk_count == 0:
-            raise HTTPException(status_code=400, detail="Could not extract text from file")
+            raise HTTPException(status_code=400, detail="Could not index text chunks into vector database")
 
         graph_result = {"facts_added": 0, "facts": []}
         graph_error = None
         try:
-            graph_result = save_profile_text_to_neo4j(file.filename, text_data)
+            # Pass the extracted text_data directly so the LLM can extract graph facts from the PDF content
+            graph_result = save_profile_text_to_neo4j(file.filename, text_data, persona=persona)
         except Exception as e:
-            # Don't fail the whole upload if only the graph write fails -
-            # the vector store already has the content - but surface it
-            # clearly instead of pretending everything succeeded.
             graph_error = str(e)
             print(f"Neo4j sync error: {graph_error}")
 
@@ -184,10 +203,22 @@ async def ingest_file(file: UploadFile = File(...)):
 @app.post("/train-persona")
 async def train_persona(request: PersonaTrainRequest):
     try:
+        scraped_summaries = []
+        # Attempt to process social/professional profile URLs provided during training
+        for url in request.social_urls:
+            scraped_summaries.append(f"Profile/Link: {url}")
+            
         links_str = ", ".join(request.social_urls) if request.social_urls else "None provided"
-        training_text = f"Persona Profile Name: {request.name}. Connected Professional/Social Links: {links_str}."
+        extra_context = " ".join(scraped_summaries)
+        training_text = f"Persona Profile Name: {request.name}. Connected Professional/Social Links: {links_str}. {extra_context}"
         
-        vector = chat_model.encode(training_text).tolist()
+        # Ingest the persona training text into vector db and graph db so it builds a proper profile
+        process_and_store_document(None, persona=request.name, direct_text=training_text)
+        
+        try:
+            save_profile_text_to_neo4j(f"{request.name}_profile_links", training_text, persona=request.name)
+        except Exception as e:
+            print(f"Graph sync error during persona training: {e}")
         
         return {
             "status": "success",
@@ -201,13 +232,24 @@ async def chat_with_persona(request: ChatRequest):
     try:
         query_vector = chat_model.encode(request.message).tolist()
         
+        # Strictly isolate Qdrant search results by matching the active persona payload tag
         search_result = db_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=4
+            limit=4,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="persona",
+                        match=MatchValue(value=request.persona)
+                    )
+                ]
+            )
         )
         vector_contexts = [hit.payload["text"] for hit in search_result.points if hit.payload]
-        graph_facts = graph_db.get_related_facts(request.message.strip())
+        
+        # Pass the active persona name to Neo4j graph query
+        graph_facts = graph_db.get_related_facts(request.persona)
         
         context_corpus = "\n".join(vector_contexts) if vector_contexts else "No document records found."
         graph_corpus = "\n".join(graph_facts) if graph_facts else "No graph records found."

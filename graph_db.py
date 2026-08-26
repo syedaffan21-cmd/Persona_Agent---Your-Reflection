@@ -2,8 +2,6 @@ import os
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-# Load .env here too, in case this module is imported before main.py
-# has called load_dotenv() (import order matters in Python).
 load_dotenv()
 
 class GraphDatabaseManager:
@@ -18,7 +16,11 @@ class GraphDatabaseManager:
 
     def connect(self):
         try:
-            self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
+            uri = self.uri
+            if uri and uri.startswith("neo4j+s://"):
+                uri = uri.replace("neo4j+s://", "neo4j+ssc://")
+                
+            self.driver = GraphDatabase.driver(uri, auth=(self.user, self.password))
             self.driver.verify_connectivity()
             print("Graph Manager successfully connected to Neo4j Aura!")
         except Exception as e:
@@ -38,8 +40,8 @@ class GraphDatabaseManager:
         MERGE (e)-[r:%s]->(t)
         """ % relation
         try:
-            with self.driver.session(database="neo4j") as session:
-                session.run(query, entity=entity, target=target)
+            with self.driver.session() as session:
+                session.run(query, entity=entity.strip(), target=target.strip())
         except Exception as e:
             print(f"Error adding fact: {e}")
 
@@ -49,7 +51,7 @@ class GraphDatabaseManager:
         
         facts = []
         try:
-            with self.driver.session(database="neo4j") as session:
+            with self.driver.session() as session:
                 query = """
                 MATCH (e:Entity {name: $entity_name})-[r]->(t)
                 RETURN e.name AS subject, type(r) AS relation, t.name AS target

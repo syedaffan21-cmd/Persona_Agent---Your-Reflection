@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -41,7 +42,7 @@
 
     <div class="flex-1 flex flex-col h-full bg-slate-900">
         
-        <header class="bg-slate-900/80 backdrop-blur border-b border-slate-800 p-4 flex justify-between items-center">
+        <header class="bg-slate-900/85 backdrop-blur border-b border-slate-800 p-4 flex justify-between items-center">
             <h1 id="activeChatTitle" class="text-base font-semibold text-slate-200">New Conversation</h1>
             <div class="text-xs text-slate-400 flex items-center gap-2">
                 <span>Status:</span> <span id="status" class="text-emerald-400 font-medium">Connected</span>
@@ -342,15 +343,16 @@
             const file = input.files[0];
             const formData = new FormData();
             formData.append("file", file);
+            formData.append("persona", currentPersona); // Pass current active persona to backend
 
             const statusEl = document.getElementById("uploadStatus");
-            statusEl.innerText = `Uploading and processing ${file.name}...`;
+            statusEl.innerText = `Uploading and processing ${file.name} for ${currentPersona}...`;
 
             try {
                 const response = await fetch("http://localhost:8000/ingest", { method: "POST", body: formData });
                 const data = await response.json();
                 if (response.ok) {
-                    statusEl.innerText = `Success! Stored ${data.chunks_stored} chunks into vector memory.`;
+                    statusEl.innerText = `Success! Stored ${data.chunks_stored} chunks into vector memory for ${currentPersona}.`;
                     statusEl.className = "px-6 text-xs text-emerald-400 h-5";
                 } else {
                     statusEl.innerText = `Error: ${data.detail}`;
@@ -446,4 +448,3 @@
         renderCurrentChatMessages();
     </script>
 </body>
-</html>
