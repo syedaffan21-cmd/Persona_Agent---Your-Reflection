@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -56,18 +55,18 @@
         <div class="p-4 bg-slate-900 border-t border-slate-800">
             <div class="flex items-center gap-2 max-w-4xl mx-auto bg-slate-800/80 border border-slate-700/80 rounded-2xl px-3 py-2 shadow-lg focus-within:border-indigo-500 transition">
                 
-                <button onclick="document.getElementById('fileInput').click()" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Upload Document">
+                <button onclick="document.getElementById('fileInput').click()" aria-label="Upload Document" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Upload Document">
                     <i class="fa-solid fa-paperclip text-lg"></i>
                 </button>
                 <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this)">
 
-                <button onclick="toggleVoiceInput()" id="voiceBtn" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Voice Input">
-                    <i class="fa-solid fa-microphone text-lg"></i>
+                <button onclick="toggleVoiceInput()" id="voiceBtn" aria-label="Voice Input" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition relative" title="Click to speak">
+                    <i id="voiceIcon" class="fa-solid fa-microphone text-lg"></i>
                 </button>
 
                 <input type="text" id="userInput" placeholder="Type a message to your twin..." class="flex-1 bg-transparent border-none px-2 py-2 text-sm text-slate-100 focus:outline-none" onkeypress="handleKeyPress(event)">
 
-                <button onclick="sendMessage(false)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center">
+                <button onclick="sendMessage(false)" aria-label="Send Message" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
             </div>
@@ -81,11 +80,11 @@
             
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Persona Name</label>
+                    <label for="newPersonaName" class="block text-xs font-semibold text-slate-400 mb-1">Persona Name</label>
                     <input type="text" id="newPersonaName" placeholder="e.g., Alex, Jordan" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Train via Social Links (LinkedIn, GitHub, etc. - multiple allowed)</label>
+                    <label for="socialProfileUrls" class="block text-xs font-semibold text-slate-400 mb-1">Train via Social Links (LinkedIn, GitHub, etc. - multiple allowed)</label>
                     <textarea id="socialProfileUrls" rows="3" placeholder="Paste multiple links separated by commas, spaces, or new lines..." class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
                 </div>
             </div>
@@ -175,10 +174,10 @@
                         <i class="fa-regular fa-message mr-2 text-xs"></i> <span>${chat.title}</span>
                     </div>
                     <div class="hidden group-hover:flex items-center gap-1.5 text-xs">
-                        <button onclick="event.stopPropagation(); togglePin(${chat.id})" class="${chat.pinned ? 'text-amber-400' : 'text-slate-500'} hover:text-slate-200" title="Pin">
+                        <button onclick="event.stopPropagation(); togglePin(${chat.id})" aria-label="Pin Chat" class="${chat.pinned ? 'text-amber-400' : 'text-slate-500'} hover:text-slate-200" title="Pin">
                             <i class="fa-solid fa-thumbtack"></i>
                         </button>
-                        <button onclick="event.stopPropagation(); deleteChat(${chat.id})" class="text-slate-500 hover:text-rose-400" title="Delete">
+                        <button onclick="event.stopPropagation(); deleteChat(${chat.id})" aria-label="Delete Chat" class="text-slate-500 hover:text-rose-400" title="Delete">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
@@ -221,7 +220,7 @@
                     chatWindow.innerHTML += `
                         <div class="flex justify-start items-end gap-2">
                             <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed text-slate-200 shadow-sm">${msg.text}</div>
-                            <button onclick="speakText('${safeText}')" class="text-slate-400 hover:text-indigo-400 p-1.5 transition mb-1" title="Read Aloud">
+                            <button onclick="speakText('${safeText}')" aria-label="Read Aloud" class="text-slate-400 hover:text-indigo-400 p-1.5 transition mb-1" title="Read Aloud">
                                 <i class="fa-solid fa-volume-high text-xs"></i>
                             </button>
                         </div>
@@ -241,6 +240,71 @@
             const preferredVoice = voices.find(v => v.name.includes('Natural') || v.name.includes('Google') || v.lang.includes('en-US'));
             if (preferredVoice) utterance.voice = preferredVoice;
             window.speechSynthesis.speak(utterance);
+        }
+
+        // Real Microphone Speech-to-Text Integration
+        let recognition = null;
+        let isListening = false;
+
+        function toggleVoiceInput() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!SpeechRecognition) {
+                // Fallback if browser doesn't support Web Speech API
+                const sampleVoicePrompt = prompt("Speech recognition not supported in this browser. Type your voice input simulation:");
+                if (sampleVoicePrompt) {
+                    document.getElementById("userInput").value = sampleVoicePrompt;
+                    sendMessage(true);
+                }
+                return;
+            }
+
+            const voiceBtn = document.getElementById("voiceBtn");
+            const voiceIcon = document.getElementById("voiceIcon");
+
+            if (isListening) {
+                recognition.stop();
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isListening = true;
+                voiceBtn.classList.add("text-rose-400", "animate-pulse");
+                voiceIcon.className = "fa-solid fa-microphone-slash text-lg";
+                document.getElementById("uploadStatus").innerText = "Listening... Speak now.";
+            };
+
+            recognition.onresult = (event) => {
+                const speechToText = event.results[0][0].transcript;
+                document.getElementById("userInput").value = speechToText;
+                document.getElementById("uploadStatus").innerText = "";
+                // Automatically send message via voice channel (triggers audio output)
+                sendMessage(true);
+            };
+
+            recognition.onerror = () => {
+                document.getElementById("uploadStatus").innerText = "Voice recognition error. Try again.";
+                stopListeningState();
+            };
+
+            recognition.onend = () => {
+                stopListeningState();
+            };
+
+            recognition.start();
+        }
+
+        function stopListeningState() {
+            isListening = false;
+            const voiceBtn = document.getElementById("voiceBtn");
+            const voiceIcon = document.getElementById("voiceIcon");
+            if (voiceBtn) voiceBtn.classList.remove("text-rose-400", "animate-pulse");
+            if (voiceIcon) voiceIcon.className = "fa-solid fa-microphone text-lg";
         }
 
         function startNewChat() {
@@ -343,7 +407,7 @@
             const file = input.files[0];
             const formData = new FormData();
             formData.append("file", file);
-            formData.append("persona", currentPersona); // Pass current active persona to backend
+            formData.append("persona", currentPersona);
 
             const statusEl = document.getElementById("uploadStatus");
             statusEl.innerText = `Uploading and processing ${file.name} for ${currentPersona}...`;
@@ -361,14 +425,6 @@
             } catch (err) {
                 statusEl.innerText = "Failed to connect to FastAPI backend.";
                 statusEl.className = "px-6 text-xs text-rose-400 h-5";
-            }
-        }
-
-        function toggleVoiceInput() {
-            const sampleVoicePrompt = prompt("Simulate Voice Input: Type what you want to say out loud:");
-            if (sampleVoicePrompt) {
-                document.getElementById("userInput").value = sampleVoicePrompt;
-                sendMessage(true);
             }
         }
 
@@ -429,6 +485,8 @@
                 saveToStorage();
                 renderCurrentChatMessages();
 
+                // CONDITIONAL OUTPUT HANDLING:
+                // If input came via voice, reply using voice output. Otherwise, text-only.
                 if (isVoiceInput) {
                     speakText(data.response);
                 }
@@ -448,3 +506,4 @@
         renderCurrentChatMessages();
     </script>
 </body>
+</html>
