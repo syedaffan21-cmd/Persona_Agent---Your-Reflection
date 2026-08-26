@@ -1,7 +1,9 @@
 import os
 import json
 import shutil
-from typing import List
+import io
+import base64
+from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,6 +16,7 @@ from vector_db import client as db_client, COLLECTION_NAME
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import pypdf
 import requests
+import PIL.Image
 
 load_dotenv()
 
@@ -38,10 +41,6 @@ deepseek_client = OpenAI(
 )
 
 GRAPH_USER_NODE = os.getenv("GRAPH_USER_NODE", "Affan Syed")
-
-class ChatRequest(BaseModel):
-    message: str
-    persona: str = "My Personal Twin"
 
 class PersonaTrainRequest(BaseModel):
     name: str
@@ -132,7 +131,6 @@ def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -
             "and NEO4J_URI/NEO4J_PASSWORD are correct)"
         )
 
-    # Clean and normalize persona name to prevent grouping errors
     clean_persona = persona.strip() if persona else "My Personal Twin"
 
     facts = extract_facts_with_llm(text_content)
@@ -144,7 +142,6 @@ def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -
         )
 
         for fact in facts:
-            # Pass the cleaned persona name to graph_db.add_fact
             graph_db.add_fact(clean_persona, fact["relation"], fact["target"])
 
         session.run(
@@ -158,6 +155,7 @@ def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -
 
     print(f"Mapped {len(facts)} fact(s) from '{filename}' into Neo4j graph for persona '{clean_persona}'.")
     return {"facts_added": len(facts), "facts": facts}
+
 @app.post("/ingest")
 async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Personal Twin")):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -167,13 +165,11 @@ async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Pers
         with open(file_path, "wb") as buffer:
             buffer.write(contents)
             
-        # Extract text correctly supporting both PDF and TXT files
         text_data = extract_text_from_file(file_path, file.filename)
         
         if not text_data:
             raise HTTPException(status_code=400, detail="Could not extract text from file or file is empty")
         
-        # Pass active persona to ingestion so vectors get tagged properly
         chunk_count = process_and_store_document(file_path, persona=persona)
         if chunk_count == 0:
             raise HTTPException(status_code=400, detail="Could not index text chunks into vector database")
@@ -181,7 +177,6 @@ async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Pers
         graph_result = {"facts_added": 0, "facts": []}
         graph_error = None
         try:
-            # Pass the extracted text_data directly so the LLM can extract graph facts from the PDF content
             graph_result = save_profile_text_to_neo4j(file.filename, text_data, persona=persona)
         except Exception as e:
             graph_error = str(e)
@@ -204,7 +199,6 @@ async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Pers
 async def train_persona(request: PersonaTrainRequest):
     try:
         scraped_summaries = []
-        # Attempt to process social/professional profile URLs provided during training
         for url in request.social_urls:
             scraped_summaries.append(f"Profile/Link: {url}")
             
@@ -212,7 +206,6 @@ async def train_persona(request: PersonaTrainRequest):
         extra_context = " ".join(scraped_summaries)
         training_text = f"Persona Profile Name: {request.name}. Connected Professional/Social Links: {links_str}. {extra_context}"
         
-        # Ingest the persona training text into vector db and graph db so it builds a proper profile
         process_and_store_document(None, persona=request.name, direct_text=training_text)
         
         try:
@@ -228,11 +221,36 @@ async def train_persona(request: PersonaTrainRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
-async def chat_with_persona(request: ChatRequest):
+async def chat_with_persona(
+    message: str = Form(...),
+    persona: str = Form("My Personal Twin"),
+    file: Optional[UploadFile] = File(None)
+):
     try:
-        query_vector = chat_model.encode(request.message).tolist()
+        file_attachment_context = ""
+        image_base64_data = None
         
-        # Strictly isolate Qdrant search results by matching the active persona payload tag
+        if file and file.filename:
+            file_bytes = await file.read()
+            file_path = os.path.join(UPLOAD_DIR, file.filename)
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
+            
+            # Check if uploaded file is an image and encode to base64 for OpenRouter/DeepSeek vision format
+            if file.content_type and file.content_type.startswith("image/"):
+                encoded_string = base64.b64encode(file_bytes).decode('utf-8')
+                image_base64_data = f"data:{file.content_type};base64,{encoded_string}"
+                file_attachment_context = f"\n\n[User attached an image named: {file.filename}]"
+            else:
+                extracted_file_text = extract_text_from_file(file_path, file.filename)
+                if extracted_file_text:
+                    file_attachment_context = f"\n\n[Attached File Content from {file.filename}]:\n{extracted_file_text}"
+                else:
+                    file_attachment_context = f"\n\n[User attached a file named: {file.filename}]"
+
+        full_message_query = message + file_attachment_context
+        query_vector = chat_model.encode(full_message_query).tolist()
+        
         search_result = db_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
@@ -241,37 +259,50 @@ async def chat_with_persona(request: ChatRequest):
                 must=[
                     FieldCondition(
                         key="persona",
-                        match=MatchValue(value=request.persona)
+                        match=MatchValue(value=persona)
                     )
                 ]
             )
         )
         vector_contexts = [hit.payload["text"] for hit in search_result.points if hit.payload]
         
-        # Pass the active persona name to Neo4j graph query
-        graph_facts = graph_db.get_related_facts(request.persona)
+        graph_facts = graph_db.get_related_facts(persona)
         
         context_corpus = "\n".join(vector_contexts) if vector_contexts else "No document records found."
         graph_corpus = "\n".join(graph_facts) if graph_facts else "No graph records found."
         
         system_prompt = (
-            f"CRITICAL INSTRUCTION: Your name and identity are strictly '{request.persona}'. "
-            f"You must embody this specific persona named '{request.persona}' at all times. "
-            f"If the user asks for your name, you must state that you are '{request.persona}'.\n\n"
+            f"CRITICAL INSTRUCTION: Your name and identity are strictly '{persona}'. "
+            f"You must embody this specific persona named '{persona}' at all times. "
+            f"If the user asks for your name, you must state that you are '{persona}'.\n\n"
             "STRICT FORMATTING RULE FOR CODE: If the user asks for programming code or code snippets, you MUST output ONLY the raw code. "
             "Do NOT include markdown block ticks (like ```), do NOT include explanations, do NOT include instructions on how to run it, do NOT include any comments, and do NOT include console prompt strings (like System.out.print or input prompts).\n\n"
             f"Here is context retrieved from the user's uploaded personal documents and records:\n{context_corpus}\n\n"
             f"Here are related relationship or entity facts:\n{graph_corpus}\n\n"
             "Guidelines:\n"
-            f"- Always respond as '{request.persona}'.\n"
+            f"- Always respond as '{persona}'.\n"
             "- If code is requested, provide ONLY the clean code with zero comments or input prompts."
         )
+
+        # Construct message content supporting standard text or OpenAI/OpenRouter vision format
+        if image_base64_data:
+            user_content_payload = [
+                {"type": "text", "text": full_message_query},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_base64_data
+                    }
+                }
+            ]
+        else:
+            user_content_payload = full_message_query
 
         response = deepseek_client.chat.completions.create(
             model="openrouter/free",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": request.message}
+                {"role": "user", "content": user_content_payload}
             ],
             stream=False
         )
@@ -284,6 +315,7 @@ async def chat_with_persona(request: ChatRequest):
             "graph_facts_count": len(graph_facts)
         }
     except Exception as e:
+        print(f"Chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
