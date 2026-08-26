@@ -16,6 +16,7 @@ from vector_db import client as db_client, COLLECTION_NAME
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import pypdf
 import requests
+from bs4 import BeautifulSoup
 import PIL.Image
 
 load_dotenv()
@@ -67,12 +68,6 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
     return text_content.strip()
 
 def extract_facts_with_llm(text_content: str) -> list[dict]:
-    """
-    Uses the LLM to dynamically pull (relation, target) facts out of ANY
-    uploaded text, instead of relying on a fixed keyword list. Returns a
-    list of {"relation": "...", "target": "..."} dicts describing edges
-    from the central user node.
-    """
     excerpt = text_content[:6000]
 
     extraction_prompt = (
@@ -121,18 +116,11 @@ def extract_facts_with_llm(text_content: str) -> list[dict]:
         print(f"LLM fact extraction failed: {e}")
         return []
 
-
 def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -> dict:
-    """Dynamically extracts entities/relationships from uploaded text and
-    writes them into Neo4j tagged specifically to the target persona."""
     if not graph_db.driver:
-        raise RuntimeError(
-            "Neo4j driver is not connected (check Aura instance is running "
-            "and NEO4J_URI/NEO4J_PASSWORD are correct)"
-        )
+        raise RuntimeError("Neo4j driver is not connected")
 
     clean_persona = persona.strip() if persona else "My Personal Twin"
-
     facts = extract_facts_with_llm(text_content)
 
     with graph_db.driver.session() as session:
@@ -153,8 +141,40 @@ def save_profile_text_to_neo4j(filename: str, text_content: str, persona: str) -
             uname=clean_persona, fname=filename
         )
 
-    print(f"Mapped {len(facts)} fact(s) from '{filename}' into Neo4j graph for persona '{clean_persona}'.")
     return {"facts_added": len(facts), "facts": facts}
+
+@app.delete("/persona/{name}")
+async def delete_persona_data(name: str):
+    """Deletes all vector embeddings from Qdrant and graph nodes/relations from Neo4j for the given persona."""
+    try:
+        clean_name = name.strip()
+        
+        try:
+            db_client.delete(
+                collection_name=COLLECTION_NAME,
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="persona",
+                            match=MatchValue(value=clean_name)
+                        )
+                    ]
+                )
+            )
+        except Exception as q_err:
+            print(f"Qdrant deletion warning: {q_err}")
+
+        if graph_db.driver:
+            with graph_db.driver.session() as session:
+                session.run(
+                    "MATCH (u:Entity {name: $uname}) DETACH DELETE u",
+                    uname=clean_name
+                )
+
+        return {"status": "success", "message": f"Successfully purged persona '{clean_name}' from databases."}
+    except Exception as e:
+        print(f"Error deleting persona: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest")
 async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Personal Twin")):
@@ -199,23 +219,41 @@ async def ingest_file(file: UploadFile = File(...), persona: str = Form("My Pers
 async def train_persona(request: PersonaTrainRequest):
     try:
         scraped_summaries = []
+        
         for url in request.social_urls:
-            scraped_summaries.append(f"Profile/Link: {url}")
+            cleaned_url = url.strip()
+            if not cleaned_url.startswith("http://") and not cleaned_url.startswith("https://"):
+                cleaned_url = "https://" + cleaned_url
+                
+            try:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                resp = requests.get(cleaned_url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    for script in soup(["script", "style", "nav", "footer", "header"]):
+                        script.decompose()
+                    scraped_text = soup.get_text(separator=' ', strip=True)
+                    scraped_summaries.append(f"Source URL ({cleaned_url}): {scraped_text[:4000]}")
+                else:
+                    scraped_summaries.append(f"Profile/Link (Unreachable HTTP {resp.status_code}): {cleaned_url}")
+            except Exception as scrape_err:
+                print(f"Failed to scrape {cleaned_url}: {scrape_err}")
+                scraped_summaries.append(f"Profile/Link: {cleaned_url}")
             
         links_str = ", ".join(request.social_urls) if request.social_urls else "None provided"
-        extra_context = " ".join(scraped_summaries)
-        training_text = f"Persona Profile Name: {request.name}. Connected Professional/Social Links: {links_str}. {extra_context}"
+        extra_context = "\n\n".join(scraped_summaries)
+        training_text = f"Persona Profile Name: {request.name}. Connected Links: {links_str}.\n\nScraped Content:\n{extra_context}"
         
         process_and_store_document(None, persona=request.name, direct_text=training_text)
         
         try:
-            save_profile_text_to_neo4j(f"{request.name}_profile_links", training_text, persona=request.name)
+            save_profile_text_to_neo4j(f"{request.name}_scraped_links", training_text, persona=request.name)
         except Exception as e:
             print(f"Graph sync error during persona training: {e}")
         
         return {
             "status": "success",
-            "message": f"Successfully initialized and trained persona '{request.name}' with {len(request.social_urls)} links."
+            "message": f"Successfully scraped and trained persona '{request.name}' with {len(request.social_urls)} links."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -236,7 +274,6 @@ async def chat_with_persona(
             with open(file_path, "wb") as f:
                 f.write(file_bytes)
             
-            # Check if uploaded file is an image and encode to base64 for OpenRouter/DeepSeek vision format
             if file.content_type and file.content_type.startswith("image/"):
                 encoded_string = base64.b64encode(file_bytes).decode('utf-8')
                 image_base64_data = f"data:{file.content_type};base64,{encoded_string}"
@@ -284,7 +321,6 @@ async def chat_with_persona(
             "- If code is requested, provide ONLY the clean code with zero comments or input prompts."
         )
 
-        # Construct message content supporting standard text or OpenAI/OpenRouter vision format
         if image_base64_data:
             user_content_payload = [
                 {"type": "text", "text": full_message_query},
