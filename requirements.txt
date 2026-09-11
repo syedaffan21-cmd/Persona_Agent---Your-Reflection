@@ -3,7 +3,7 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 pydantic
-sentence-transformers
+fastembed
 openai
 pypdf
 Pillow

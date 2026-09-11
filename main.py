@@ -18,7 +18,7 @@ from openai import OpenAI, RateLimitError, APIStatusError, APIConnectionError, A
 from dotenv import load_dotenv
 from ingestion import process_and_store_document
 from graph_db import graph_db
-from vector_db import client as db_client, COLLECTION_NAME, embedding_model as chat_model
+from vector_db import client as db_client, COLLECTION_NAME, encode_single
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 import pypdf
 import PIL.Image
@@ -855,7 +855,7 @@ async def chat_with_persona(
         full_message_query = actual_message + file_attachment_context + external_scraped_context
         if len(actual_message.strip()) >= 20:
             update_persona_voice_sample(persona, "live_chat_input", actual_message, accumulate=True)
-        query_vector = chat_model.encode(full_message_query).tolist()
+        query_vector = encode_single(full_message_query)
         
         search_result = db_client.query_points(
             collection_name=COLLECTION_NAME,

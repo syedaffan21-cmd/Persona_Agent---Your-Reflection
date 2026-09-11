@@ -2,7 +2,7 @@ import os
 import re
 from pypdf import PdfReader
 from qdrant_client.models import PointStruct
-from vector_db import client, COLLECTION_NAME, init_vector_db, embedding_model
+from vector_db import client, COLLECTION_NAME, init_vector_db, encode_many
 
 def extract_text_from_file(file_path: str) -> str:
     text = ""
@@ -36,7 +36,7 @@ def process_and_store_document(file_path: str = None, persona: str = "My Persona
     for i in range(0, len(words), 300):
         chunks.append(" ".join(words[i:i + 300]))
 
-    embeddings = embedding_model.encode(chunks).tolist()
+    embeddings = encode_many(chunks)
     
     source_name = os.path.basename(file_path) if file_path else f"{persona}_profile"
     
