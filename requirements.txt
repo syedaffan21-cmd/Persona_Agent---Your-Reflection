@@ -1,11 +1,21 @@
 fastapi
-uvicorn
-pydantic
+uvicorn[standard]
+python-multipart
 python-dotenv
+pydantic
 sentence-transformers
+openai
+pypdf
+Pillow
+httpx
+beautifulsoup4
 qdrant-client
 neo4j
-python-multipart
-pypdf
-openai
-beautifulsoup4
+playwright
+
+# twikit (upstream) is broken as of 2026 (ClientTransaction/KEY_BYTE parsing
+# failures + sticky 404s). twifork is a maintained fork that installs and
+# still imports as `twikit`, so no code changes are needed beyond this pin.
+# The [impersonate] extra pulls in curl_cffi for browser-TLS impersonation
+# (used as impersonate="chrome124" in main.py) to avoid some 403s from X.
+twifork[impersonate]

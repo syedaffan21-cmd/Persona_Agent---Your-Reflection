@@ -4,136 +4,240 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Persona Twin</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Fixed: Using Tailwind v3 CDN which supports direct file:// protocol loading -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+        .chat-bg-pattern {
+            background-color: #03070a;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(8, 145, 178, 0.12) 0px, transparent 50%),
+                radial-gradient(at 50% 50%, rgba(15, 23, 42, 1) 0px, transparent 100%);
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(6, 19, 24, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(26, 75, 89, 0.8);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(45, 122, 143, 0.8);
+        }
+        .trait-pill-text {
+            cursor: default;
+        }
+        #traitTooltip {
+            position: fixed;
+            max-width: 260px;
+            width: max-content;
+            padding: 6px 10px;
+            border-radius: 8px;
+            background: #0f2027;
+            border: 1px solid rgba(45, 212, 191, 0.35);
+            color: #e2f8f5;
+            font-size: 11px;
+            line-height: 1.4;
+            text-align: left;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.1s ease-out;
+            z-index: 9999;
+        }
+        #traitTooltip.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
 </head>
-<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden">
+<body class="text-slate-100 h-screen flex overflow-hidden selection:bg-teal-500 selection:text-white chat-bg-pattern relative">
+    <div id="traitTooltip"></div>
 
-    <aside class="w-72 bg-slate-950 border-r border-slate-800 flex flex-col justify-between">
+    <aside class="w-72 bg-slate-950/75 backdrop-blur-xl border-r border-teal-900/30 flex flex-col justify-between z-10 shadow-2xl">
         <div>
-            <div class="p-4 border-b border-slate-800">
+            <div class="p-4 border-b border-teal-900/30">
                 <div class="flex justify-between items-center mb-2">
-                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Persona</span>
-                    <button onclick="openPersonaModal()" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
-                        <i class="fa-solid fa-plus"></i> New Persona
+                    <span class="text-xs font-bold text-teal-400/80 uppercase tracking-wider">Active Persona</span>
+                    <button onclick="openPersonaModal()" class="text-xs font-medium text-teal-400 hover:text-teal-300 flex items-center gap-1 transition">
+                        <i class="fa-solid fa-plus text-[10px]"></i> New Persona
                     </button>
                 </div>
                 <div class="flex items-center gap-2">
-                    <select id="personaSelect" onchange="changePersona(this.value)" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <select id="personaSelect" onchange="changePersona(this.value)" class="flex-1 bg-slate-900/90 border border-teal-900/40 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition shadow-inner">
                         <option value="My Personal Twin">My Personal Twin</option>
                     </select>
-                    <button onclick="deleteCurrentPersona()" class="bg-slate-900 hover:bg-rose-950/50 border border-slate-700 hover:border-rose-800 text-slate-400 hover:text-rose-400 p-2 rounded-lg text-sm transition" title="Delete current persona">
+                    <button onclick="deleteCurrentPersona()" class="bg-slate-900/90 hover:bg-rose-950/40 border border-teal-900/40 hover:border-rose-800/60 text-slate-400 hover:text-rose-400 p-2.5 rounded-xl text-sm transition shadow-sm" title="Delete current persona">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </div>
-                <button onclick="openTrainModal()" class="mt-3 w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium py-1.5 px-3 rounded-lg text-xs flex items-center justify-center gap-2 transition">
-                    <i class="fa-solid fa-graduation-cap text-indigo-400"></i> Train Current Persona
+                <button onclick="openTrainModal()" class="mt-3 w-full bg-gradient-to-r from-teal-950/60 to-slate-900 hover:from-teal-900/50 hover:to-slate-800 text-slate-200 border border-teal-800/40 font-medium py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-sm group">
+                    <i class="fa-solid fa-graduation-cap text-teal-400 group-hover:scale-110 transition-transform"></i> Train Current Persona
                 </button>
+            </div>
+
+            <!-- Dedicated Persona Traits Section -->
+            <div class="p-4 border-b border-teal-900/30">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-bold text-teal-400/80 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-masks-theater text-[11px] text-teal-400"></i> Persona Traits
+                    </span>
+                    <button onclick="toggleAddTraitInput()" class="text-xs font-medium text-teal-400 hover:text-teal-300 flex items-center gap-1 transition" title="Add custom trait">
+                        <i class="fa-solid fa-plus text-[10px]"></i> Add
+                    </button>
+                </div>
+                <div id="addTraitContainer" class="hidden mb-2.5">
+                    <div class="flex items-center gap-1.5">
+                        <input type="text" id="newTraitInput" placeholder="e.g. Sarcastic, Calm..." class="flex-1 bg-slate-900 border border-teal-800/60 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-teal-400" onkeypress="handleTraitKeyPress(event)">
+                        <button onclick="submitNewTrait()" class="bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium transition shadow">Save</button>
+                    </div>
+                </div>
+                <div id="personaTraitsList" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                    <span class="text-[11px] text-slate-500 italic">Loading traits...</span>
+                </div>
             </div>
 
             <div class="p-4">
-                <button onclick="startNewChat()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center justify-center gap-2 transition">
-                    <i class="fa-solid fa-plus"></i> New Chat
+                <button onclick="startNewChat()" class="w-full bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white font-medium py-2.5 px-4 rounded-xl text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-teal-600/20 active:scale-[0.98]">
+                    <i class="fa-solid fa-plus text-xs"></i> New Chat
                 </button>
             </div>
 
-            <div class="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">Chat History</div>
-            <div id="chatHistoryList" class="overflow-y-auto px-2 space-y-1 h-[calc(100vh-320px)]"></div>
+            <div class="px-4 py-2 text-xs font-bold text-teal-500/70 uppercase tracking-wider">Chat History</div>
+            <div id="chatHistoryList" class="overflow-y-auto px-2 space-y-1 h-[calc(100vh-455px)]"></div>
         </div>
 
-        <div class="p-4 border-t border-slate-800 flex items-center justify-between text-sm text-slate-400">
-            <span class="flex items-center gap-2"><i class="fa-solid fa-circle text-emerald-400 text-xs"></i> Online</span>
-            <span class="text-xs text-slate-500">v2.2</span>
+        <div class="p-4 border-t border-teal-900/30 flex items-center justify-between text-sm text-slate-400 bg-slate-950/50">
+            <span class="flex items-center gap-2 text-xs font-medium"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span></span> Online</span>
+            <span class="text-[10px] tracking-wider uppercase bg-teal-950/60 border border-teal-800/40 px-2 py-0.5 rounded-md text-teal-300">v2.6 Immersive</span>
         </div>
     </aside>
 
-    <div class="flex-1 flex flex-col h-full bg-slate-900">
+    <div class="flex-1 flex flex-col h-full bg-transparent relative z-10">
         
-        <header class="bg-slate-900/85 backdrop-blur border-b border-slate-800 p-4 flex justify-between items-center">
-            <h1 id="activeChatTitle" class="text-base font-semibold text-slate-200">New Conversation</h1>
-            <div class="text-xs text-slate-400 flex items-center gap-2">
-                <span>Status:</span> <span id="status" class="text-emerald-400 font-medium">Connected</span>
+        <header class="bg-slate-950/40 backdrop-blur-md border-b border-teal-900/20 px-6 py-4 flex justify-between items-center">
+            <div>
+                <h1 id="activeChatTitle" class="text-base font-semibold text-slate-200 tracking-tight">New Conversation</h1>
+                <div id="headerTraitsPreview" class="text-[11px] text-teal-400/80 mt-0.5 truncate max-w-xl"></div>
+            </div>
+            <div class="text-xs text-slate-400 flex items-center gap-2 bg-slate-950/60 border border-teal-900/30 px-3 py-1.5 rounded-full shadow-sm">
+                <span>Status:</span> <span id="status" class="text-teal-400 font-medium flex items-center gap-1">Connected</span>
             </div>
         </header>
 
         <div id="chatWindow" class="flex-1 overflow-y-auto p-6 space-y-6"></div>
 
-        <div id="uploadStatus" class="px-6 text-xs text-slate-400 h-5"></div>
+        <div id="uploadStatus" class="px-6 text-xs text-teal-400 h-5 font-medium transition-all"></div>
 
-        <div class="p-4 bg-slate-900 border-t border-slate-800">
-            <div id="attachmentPreview" class="hidden max-w-4xl mx-auto mb-2 flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-xs text-slate-300 w-fit">
-                <i class="fa-solid fa-file text-indigo-400"></i>
-                <span id="attachmentFileName" class="truncate max-w-xs"></span>
-                <button onclick="clearAttachment()" class="text-slate-400 hover:text-rose-400 ml-2" title="Remove attachment">
+        <div class="p-4 bg-slate-950/30 backdrop-blur-md border-t border-teal-900/20">
+            <div id="attachmentPreview" class="hidden max-w-4xl mx-auto mb-2 flex items-center gap-2 bg-slate-900/90 border border-teal-800/40 px-3 py-1.5 rounded-xl text-xs text-slate-300 w-fit animate-fade-in shadow-lg">
+                <i class="fa-solid fa-file text-teal-400"></i>
+                <span id="attachmentFileName" class="truncate max-w-xs font-medium"></span>
+                <button onclick="clearAttachment()" class="text-slate-400 hover:text-rose-400 ml-2 transition" title="Remove attachment">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
-            <div class="flex items-center gap-2 max-w-4xl mx-auto bg-slate-800/80 border border-slate-700/80 rounded-2xl px-3 py-2 shadow-lg focus-within:border-indigo-500 transition">
+            <div class="flex items-center gap-2 max-w-4xl mx-auto bg-slate-950/80 border border-teal-900/40 rounded-2xl px-3 py-2 shadow-2xl focus-within:border-teal-500/80 focus-within:ring-2 focus-within:ring-teal-500/20 transition-all">
                 
-                <button onclick="document.getElementById('chatFileInput').click()" aria-label="Share File with Agent" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition" title="Share file/photo with agent">
+                <button onclick="document.getElementById('chatFileInput').click()" aria-label="Share File with Agent" class="text-slate-400 hover:text-teal-400 p-2 rounded-xl transition hover:bg-teal-950/40" title="Share file/photo with agent">
                     <i class="fa-solid fa-paperclip text-lg"></i>
                 </button>
                 <input type="file" id="chatFileInput" class="hidden">
 
-                <button onclick="toggleVoiceInput()" id="voiceBtn" aria-label="Voice Input" class="text-slate-400 hover:text-slate-200 p-2 rounded-xl transition relative" title="Click to speak">
+                <button onclick="openUrlModal()" aria-label="Scrape Web URL" class="text-slate-400 hover:text-teal-400 p-2 rounded-xl transition hover:bg-teal-950/40" title="Scrape webpage into context">
+                    <i class="fa-solid fa-globe text-lg"></i>
+                </button>
+
+                <button onclick="toggleVoiceInput()" id="voiceBtn" aria-label="Voice Input" class="text-slate-400 hover:text-teal-400 p-2 rounded-xl transition hover:bg-teal-950/40 relative" title="Click to speak">
                     <i id="voiceIcon" class="fa-solid fa-microphone text-lg"></i>
                 </button>
 
-                <input type="text" id="userInput" placeholder="Type a message to your twin..." class="flex-1 bg-transparent border-none px-2 py-2 text-sm text-slate-100 focus:outline-none" onkeypress="handleKeyPress(event)">
+                <input type="text" id="userInput" placeholder="Type a message to your twin..." class="flex-1 bg-transparent border-none px-2 py-2 text-sm text-slate-100 focus:outline-none placeholder:text-slate-500" onkeypress="handleKeyPress(event)">
 
-                <button onclick="sendMessage(false)" aria-label="Send Message" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center">
-                    <i class="fa-solid fa-paper-plane"></i>
+                <button onclick="sendMessage(false)" aria-label="Send Message" class="bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition shadow-lg shadow-teal-600/25 flex items-center justify-center active:scale-95">
+                    <i class="fa-solid fa-paper-plane text-xs"></i>
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- Modal for Creating New Persona -->
-    <div id="personaModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-        <div class="bg-slate-900 border border-slate-800 w-full max-w-md p-6 rounded-2xl shadow-2xl space-y-4">
-            <h2 class="text-lg font-bold text-slate-100">Create New Persona</h2>
-            <p class="text-xs text-slate-400">Give your new persona a name.</p>
+    <div id="urlModal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-slate-900 border border-teal-900/40 w-full max-w-md p-6 rounded-3xl shadow-2xl space-y-4">
+            <h2 class="text-lg font-bold text-slate-100 tracking-tight">Scrape Web URL & Photos</h2>
+            <p class="text-xs text-slate-400">Enter a website link to scrape content and photos directly into your active chat conversation.</p>
+            
+            <div>
+                <label for="urlInputPrompt" class="block text-xs font-semibold text-slate-400 mb-1">Webpage URL</label>
+                <input type="url" id="urlInputPrompt" placeholder="https://example.com" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition">
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <button onclick="closeUrlModal()" class="px-4 py-2.5 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">Cancel</button>
+                <button onclick="submitUrlScrape()" class="px-4 py-2.5 rounded-xl text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition shadow-lg shadow-teal-600/20">Scrape & Send</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="personaModal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-slate-900 border border-teal-900/40 w-full max-w-md p-6 rounded-3xl shadow-2xl space-y-4">
+            <h2 class="text-lg font-bold text-slate-100 tracking-tight">Create New Persona</h2>
+            <p class="text-xs text-slate-400">Give your new digital twin persona a name.</p>
             
             <div class="space-y-3">
                 <div>
                     <label for="newPersonaName" class="block text-xs font-semibold text-slate-400 mb-1">Persona Name</label>
-                    <input type="text" id="newPersonaName" placeholder="e.g., Alex, Jordan" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <input type="text" id="newPersonaName" placeholder="e.g., Alex, Jordan" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition">
                 </div>
             </div>
 
             <div class="flex justify-end gap-2 pt-2">
-                <button onclick="closePersonaModal()" class="px-4 py-2 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300">Cancel</button>
-                <button onclick="saveNewPersona()" class="px-4 py-2 rounded-xl text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Create</button>
+                <button onclick="closePersonaModal()" class="px-4 py-2.5 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">Cancel</button>
+                <button onclick="saveNewPersona()" class="px-4 py-2.5 rounded-xl text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition shadow-lg shadow-teal-600/20">Create Persona</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal for Training Existing Persona via Website Scraping or Files -->
-    <div id="trainModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-        <div class="bg-slate-900 border border-slate-800 w-full max-w-md p-6 rounded-2xl shadow-2xl space-y-4">
-            <h2 class="text-lg font-bold text-slate-100">Train Persona: <span id="trainModalPersonaName" class="text-indigo-400"></span></h2>
-            <p class="text-xs text-slate-400">Provide website links to scrape or upload documents to update this persona's graph/vector memory.</p>
+    <div id="trainModal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 animate-fade-in">
+        <div class="bg-slate-900 border border-teal-900/40 w-full max-w-md p-6 rounded-3xl shadow-2xl space-y-4">
+            <h2 class="text-lg font-bold text-slate-100 tracking-tight">Train Persona: <span id="trainModalPersonaName" class="text-teal-400"></span></h2>
+            <p class="text-xs text-slate-400">Provide website links to scrape text and photos or upload documents to update this persona.</p>
             
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Upload Training Document/PDF</label>
-                    <input type="file" id="trainFileInput" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-300 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500">
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Upload Training Document / PDF</label>
+                    <input type="file" id="trainFileInput" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2 text-xs text-slate-300 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-600 file:text-white hover:file:bg-teal-500 transition">
                 </div>
                 <div>
                     <label for="socialProfileUrls" class="block text-xs font-semibold text-slate-400 mb-1">Website Links to Scrape (comma/space separated)</label>
-                    <textarea id="socialProfileUrls" rows="3" placeholder="https://example.com/bio, https://github.com/username" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
+                    <textarea id="socialProfileUrls" rows="3" placeholder="https://example.com/bio, https://github.com/username" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition"></textarea>
                 </div>
             </div>
 
             <div class="flex justify-end gap-2 pt-2">
-                <button onclick="closeTrainModal()" class="px-4 py-2 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300">Cancel</button>
-                <button onclick="submitPersonaTraining()" class="px-4 py-2 rounded-xl text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Start Training & Scraping</button>
+                <button onclick="closeTrainModal()" class="px-4 py-2.5 rounded-xl text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">Cancel</button>
+                <button onclick="submitPersonaTraining()" class="px-4 py-2.5 rounded-xl text-sm bg-teal-600 hover:bg-teal-500 text-white font-medium transition shadow-lg shadow-teal-600/20">Start Training & Scraping</button>
             </div>
         </div>
     </div>
 
     <script>
+        // Change this one line to your deployed backend URL after you deploy it
+        // (e.g. "https://your-app-name.onrender.com"). Leave as-is for local dev.
+        const API_BASE = "http://localhost:8000";
+
         let allPersonaChats = JSON.parse(localStorage.getItem("persona_chats_map")) || {
             "My Personal Twin": [
                 { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
@@ -151,6 +255,143 @@
 
         let currentChatId = parseInt(localStorage.getItem(`persona_current_chat_${currentPersona}`)) || allPersonaChats[currentPersona][0].id;
         let pendingAttachment = null; 
+
+        function showTraitTooltip(anchorEl, text) {
+            const tooltip = document.getElementById("traitTooltip");
+            if (!tooltip) return;
+            tooltip.textContent = text;
+            tooltip.classList.add("visible");
+
+            const rect = anchorEl.getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+
+            let left = rect.left + rect.width / 2 - tooltipRect.width / 2;
+            left = Math.max(8, Math.min(left, window.innerWidth - tooltipRect.width - 8));
+
+            let top = rect.top - tooltipRect.height - 8;
+            if (top < 8) {
+                top = rect.bottom + 8; // not enough room above, flip below
+            }
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+        }
+
+        function hideTraitTooltip() {
+            const tooltip = document.getElementById("traitTooltip");
+            if (tooltip) tooltip.classList.remove("visible");
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const traitsListEl = document.getElementById("personaTraitsList");
+            if (traitsListEl) {
+                traitsListEl.addEventListener("scroll", hideTraitTooltip);
+            }
+        });
+
+        async function loadPersonaTraits(personaName) {
+            const listEl = document.getElementById("personaTraitsList");
+            const headerPreview = document.getElementById("headerTraitsPreview");
+            if (!listEl) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/persona/${encodeURIComponent(personaName)}/traits`);
+                if (!res.ok) throw new Error("Failed to fetch traits");
+                const data = await res.json();
+                const traits = data.traits || [];
+                
+                listEl.innerHTML = "";
+                if (traits.length === 0) {
+                    listEl.innerHTML = `<span class="text-[11px] text-slate-500 italic">No traits extracted yet. Click Add or train your persona.</span>`;
+                    if (headerPreview) headerPreview.innerText = "";
+                    return;
+                }
+
+                if (headerPreview) {
+                    headerPreview.innerText = `Traits: ${traits.slice(0, 3).join(" • ")}${traits.length > 3 ? " • ..." : ""}`;
+                }
+
+                traits.forEach(trait => {
+                    const pill = document.createElement("span");
+                    pill.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] bg-teal-950/70 border border-teal-800/50 text-teal-300 shadow-sm group hover:border-teal-700 transition";
+                    
+                    const textSpan = document.createElement("span");
+                    textSpan.textContent = trait;
+                    textSpan.className = "trait-pill-text max-w-[170px] truncate";
+                    textSpan.setAttribute("data-full-text", trait);
+                    textSpan.addEventListener("mouseenter", () => showTraitTooltip(textSpan, trait));
+                    textSpan.addEventListener("mouseleave", hideTraitTooltip);
+                    
+                    const delBtn = document.createElement("button");
+                    delBtn.className = "text-teal-500/70 hover:text-rose-400 ml-0.5 opacity-60 group-hover:opacity-100 transition";
+                    delBtn.title = "Delete trait";
+                    delBtn.innerHTML = `<i class="fa-solid fa-xmark text-[9px]"></i>`;
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deletePersonaTrait(trait);
+                    };
+
+                    pill.appendChild(textSpan);
+                    pill.appendChild(delBtn);
+                    listEl.appendChild(pill);
+                });
+            } catch (err) {
+                listEl.innerHTML = `<span class="text-[11px] text-slate-500 italic">No traits available.</span>`;
+            }
+        }
+
+        function toggleAddTraitInput() {
+            const container = document.getElementById("addTraitContainer");
+            const input = document.getElementById("newTraitInput");
+            container.classList.toggle("hidden");
+            if (!container.classList.contains("hidden")) {
+                input.focus();
+            }
+        }
+
+        function handleTraitKeyPress(event) {
+            if (event.key === "Enter") {
+                submitNewTrait();
+            }
+        }
+
+        async function submitNewTrait() {
+            const input = document.getElementById("newTraitInput");
+            const traitVal = input.value.trim();
+            if (!traitVal) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/persona/${encodeURIComponent(currentPersona)}/traits`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ trait: traitVal })
+                });
+                if (res.ok) {
+                    input.value = "";
+                    document.getElementById("addTraitContainer").classList.add("hidden");
+                    await loadPersonaTraits(currentPersona);
+                    const statusEl = document.getElementById("uploadStatus");
+                    statusEl.innerText = `Trait added for '${currentPersona}'.`;
+                    statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+                    setTimeout(() => { statusEl.innerText = ""; }, 3000);
+                }
+            } catch (err) {
+                alert("Failed to add trait to backend.");
+            }
+        }
+
+        async function deletePersonaTrait(traitText) {
+            try {
+                const res = await fetch(`${API_BASE}/persona/${encodeURIComponent(currentPersona)}/traits/${encodeURIComponent(traitText)}`, {
+                    method: "DELETE"
+                });
+                if (res.ok) {
+                    await loadPersonaTraits(currentPersona);
+                }
+            } catch (err) {
+                console.error("Failed to delete trait:", err);
+            }
+        }
 
         function initPersonas() {
             const select = document.getElementById("personaSelect");
@@ -179,6 +420,7 @@
             saveToStorage();
             renderChatHistory();
             renderCurrentChatMessages();
+            loadPersonaTraits(currentPersona);
         }
 
         async function deleteCurrentPersona() {
@@ -194,7 +436,7 @@
             const personaToDelete = currentPersona;
 
             try {
-                await fetch(`http://localhost:8000/persona/${encodeURIComponent(personaToDelete)}`, {
+                await fetch(`${API_BASE}/persona/${encodeURIComponent(personaToDelete)}`, {
                     method: "DELETE"
                 });
             } catch (err) {
@@ -218,10 +460,11 @@
             initPersonas();
             renderChatHistory();
             renderCurrentChatMessages();
+            loadPersonaTraits(currentPersona);
 
             const statusEl = document.getElementById("uploadStatus");
             statusEl.innerText = `Persona '${personaToDelete}' deleted successfully.`;
-            statusEl.className = "px-6 text-xs text-rose-400 h-5";
+            statusEl.className = "px-6 text-xs text-rose-400 h-5 font-medium";
         }
 
         function saveToStorage() {
@@ -249,22 +492,86 @@
             sortedChats.forEach(chat => {
                 const isActive = chat.id === currentChatId;
                 const div = document.createElement("div");
-                div.className = `group flex items-center justify-between px-3 py-2 rounded-xl text-sm cursor-pointer transition ${isActive ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`;
+                div.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer transition-all ${isActive ? 'bg-teal-600/25 border border-teal-500/40 text-white font-medium shadow-sm' : 'text-slate-400 hover:bg-teal-950/40 hover:text-slate-200 border border-transparent'}`;
                 div.innerHTML = `
-                    <div class="truncate flex-1 mr-2" onclick="switchChat(${chat.id})">
-                        <i class="fa-regular fa-message mr-2 text-xs"></i> <span>${chat.title}</span>
+                    <div class="truncate flex-1 mr-2 flex items-center gap-2" onclick="switchChat(${chat.id})">
+                        <i class="fa-regular fa-message text-xs ${isActive ? 'text-teal-400' : 'text-slate-500'}"></i> <span class="truncate">${chat.title}</span>
                     </div>
                     <div class="hidden group-hover:flex items-center gap-1.5 text-xs">
-                        <button onclick="event.stopPropagation(); togglePin(${chat.id})" aria-label="Pin Chat" class="${chat.pinned ? 'text-amber-400' : 'text-slate-500'} hover:text-slate-200" title="Pin">
+                        <button onclick="event.stopPropagation(); renameChat(${chat.id})" aria-label="Rename Chat" class="text-slate-500 hover:text-teal-400 transition" title="Rename">
+                            <i class="fa-solid fa-pen"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); togglePin(${chat.id})" aria-label="Pin Chat" class="${chat.pinned ? 'text-amber-400' : 'text-slate-500'} hover:text-slate-200 transition" title="Pin">
                             <i class="fa-solid fa-thumbtack"></i>
                         </button>
-                        <button onclick="event.stopPropagation(); deleteChat(${chat.id})" aria-label="Delete Chat" class="text-slate-500 hover:text-rose-400" title="Delete">
+                        <button onclick="event.stopPropagation(); deleteChat(${chat.id})" aria-label="Delete Chat" class="text-slate-500 hover:text-rose-400 transition" title="Delete">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
                 `;
                 listEl.appendChild(div);
             });
+        }
+
+        function renameChat(id) {
+            let chats = getCurrentChats();
+            const chat = chats.find(c => c.id === id);
+            if (!chat) return;
+
+            const newTitle = prompt("Enter new chat title:", chat.title);
+            if (newTitle && newTitle.trim().length > 0) {
+                chat.title = newTitle.trim();
+                saveToStorage();
+                renderChatHistory();
+                renderCurrentChatMessages();
+            }
+        }
+
+        function copyMessage(index) {
+            let chats = getCurrentChats();
+            let chat = chats.find(c => c.id === currentChatId);
+            if (!chat || !chat.messages[index]) return;
+            
+            navigator.clipboard.writeText(chat.messages[index].text).then(() => {
+                const statusEl = document.getElementById("uploadStatus");
+                statusEl.innerText = "Message copied to clipboard!";
+                statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+                setTimeout(() => { statusEl.innerText = ""; }, 3000);
+            });
+        }
+
+        async function editMessage(index) {
+            let chats = getCurrentChats();
+            let chat = chats.find(c => c.id === currentChatId);
+            if (!chat || !chat.messages[index]) return;
+            
+            const currentText = chat.messages[index].text;
+            const newText = prompt("Edit your message:", currentText);
+            
+            if (newText !== null && newText.trim() !== "") {
+                chat.messages = chat.messages.slice(0, index);
+                saveToStorage();
+                renderCurrentChatMessages();
+                await triggerBackendMessage(newText.trim());
+            }
+        }
+
+        function speakText(index) {
+            let chats = getCurrentChats();
+            let chat = chats.find(c => c.id === currentChatId);
+            if (!chat || !chat.messages[index]) return;
+            
+            const text = chat.messages[index].text;
+            if (!('speechSynthesis' in window)) return;
+            
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(v => v.name.includes('Natural') || v.name.includes('Google') || v.lang.includes('en-US'));
+            if (preferredVoice) utterance.voice = preferredVoice;
+            window.speechSynthesis.speak(utterance);
         }
 
         function renderCurrentChatMessages() {
@@ -277,9 +584,15 @@
 
             if (!chat || !chat.messages || chat.messages.length === 0) {
                 chatWindow.innerHTML = `
-                    <div class="flex justify-start">
-                        <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed shadow-sm text-slate-200">
-                            Hey! I'm your Persona Twin (${currentPersona}). Type a message or attach a file below.
+                    <div class="flex justify-start animate-fade-in">
+                        <div class="bg-slate-900/80 backdrop-blur-md border border-teal-900/40 rounded-2xl px-5 py-4 max-w-md text-sm leading-relaxed shadow-xl text-slate-200 flex items-start gap-3">
+                            <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-teal-600 to-cyan-600 flex items-center justify-center text-white shrink-0 mt-0.5 shadow-md">
+                                <i class="fa-solid fa-robot text-xs"></i>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-slate-100 mb-1">Hello there!</p>
+                                <p class="text-slate-300">I'm your Persona Twin (<span class="text-teal-400">${currentPersona}</span>). Type a message, link references, or attach files below to start chatting.</p>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -289,39 +602,57 @@
 
             document.getElementById("activeChatTitle").innerText = chat.title;
 
-            chat.messages.forEach(msg => {
+            chat.messages.forEach((msg, index) => {
+                const rawText = msg.text || "";
+                const formattedText = rawText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                
                 if (msg.sender === "user") {
                     chatWindow.innerHTML += `
-                        <div class="flex justify-end">
-                            <div class="bg-indigo-600 text-white rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed shadow-md">${msg.text || ""}</div>
+                        <div class="flex justify-end animate-fade-in group relative mb-4">
+                            <div class="flex flex-col items-end gap-1">
+                                <div class="bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-2xl px-4.5 py-3 max-w-lg text-sm leading-relaxed shadow-lg shadow-teal-600/10">${formattedText}</div>
+                                <div class="hidden group-hover:flex items-center gap-2 mr-2">
+                                    <button onclick="editMessage(${index})" aria-label="Edit Message" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Edit">
+                                        <i class="fa-solid fa-pen text-xs"></i>
+                                    </button>
+                                    <button onclick="copyMessage(${index})" aria-label="Copy Message" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Copy">
+                                        <i class="fa-solid fa-copy text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else if (msg.sender === "system") {
+                    chatWindow.innerHTML += `
+                        <div class="flex justify-center animate-fade-in mb-4">
+                            <div class="flex items-start gap-2 bg-amber-950/40 border border-amber-700/40 rounded-xl px-4 py-2.5 max-w-lg text-xs leading-relaxed text-amber-300">
+                                <i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0"></i>
+                                <span>${formattedText}</span>
+                            </div>
                         </div>
                     `;
                 } else {
-                    const rawText = msg.text || "";
-                    const safeText = rawText.replace(/'/g, "\\'").replace(/"/g, "&quot;");
                     chatWindow.innerHTML += `
-                        <div class="flex justify-start items-end gap-2">
-                            <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed text-slate-200 shadow-sm">${rawText}</div>
-                            <button onclick="speakText('${safeText}')" aria-label="Read Aloud" class="text-slate-400 hover:text-indigo-400 p-1.5 transition mb-1" title="Read Aloud">
-                                <i class="fa-solid fa-volume-high text-xs"></i>
-                            </button>
+                        <div class="flex justify-start items-end gap-2 animate-fade-in group mb-4">
+                            <div class="w-7 h-7 rounded-full bg-teal-950/90 border border-teal-800/50 flex items-center justify-center text-teal-400 shrink-0 mb-6 shadow-sm">
+                                <i class="fa-solid fa-robot text-xs"></i>
+                            </div>
+                            <div class="flex flex-col items-start gap-1">
+                                <div id="bot_msg_${index}" class="bg-slate-900/80 backdrop-blur-md border border-teal-900/40 rounded-2xl px-4.5 py-3 max-w-lg text-sm leading-relaxed text-slate-200 shadow-xl">${formattedText}</div>
+                                <div class="hidden group-hover:flex items-center gap-2 ml-2">
+                                    <button onclick="speakText(${index})" aria-label="Read Aloud" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Read Aloud">
+                                        <i class="fa-solid fa-volume-high text-xs"></i>
+                                    </button>
+                                    <button onclick="copyMessage(${index})" aria-label="Copy Message" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Copy">
+                                        <i class="fa-solid fa-copy text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     `;
                 }
             });
             chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-
-        function speakText(text) {
-            if (!('speechSynthesis' in window)) return;
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            const voices = window.speechSynthesis.getVoices();
-            const preferredVoice = voices.find(v => v.name.includes('Natural') || v.name.includes('Google') || v.lang.includes('en-US'));
-            if (preferredVoice) utterance.voice = preferredVoice;
-            window.speechSynthesis.speak(utterance);
         }
 
         let recognition = null;
@@ -421,6 +752,25 @@
             renderCurrentChatMessages();
         }
 
+        function openUrlModal() {
+            document.getElementById("urlModal").classList.remove("hidden");
+            document.getElementById("urlInputPrompt").focus();
+        }
+
+        function closeUrlModal() {
+            document.getElementById("urlModal").classList.add("hidden");
+            document.getElementById("urlInputPrompt").value = "";
+        }
+
+        async function submitUrlScrape() {
+            const urlVal = document.getElementById("urlInputPrompt").value.trim();
+            if (!urlVal) return alert("Please enter a valid URL.");
+
+            closeUrlModal();
+            const displayMessage = `[Scrape URL: ${urlVal}]`;
+            await triggerBackendMessage(displayMessage);
+        }
+
         function openPersonaModal() {
             document.getElementById("personaModal").classList.remove("hidden");
         }
@@ -458,10 +808,11 @@
             saveToStorage();
             renderChatHistory();
             renderCurrentChatMessages();
+            loadPersonaTraits(currentPersona);
 
             const statusEl = document.getElementById("uploadStatus");
-            statusEl.innerText = `Persona '${name}' created. Click 'Train Current Persona' to add website links or documents.`;
-            statusEl.className = "px-6 text-xs text-emerald-400 h-5";
+            statusEl.innerText = `Persona '${name}' created successfully.`;
+            statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
         }
 
         async function submitPersonaTraining() {
@@ -471,15 +822,18 @@
 
             closeTrainModal();
             const statusEl = document.getElementById("uploadStatus");
-            statusEl.innerText = `Training persona '${currentPersona}' (scraping websites & updating graph)...`;
+            statusEl.innerText = `Training persona '${currentPersona}' (scraping web links & extracting traits)...`;
 
             try {
+                let totalTraitsAdded = 0;
                 if (socialUrls.length > 0) {
-                    await fetch("http://localhost:8000/train-persona", {
+                    const resp = await fetch(`${API_BASE}/train-persona`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ name: currentPersona, social_urls: socialUrls })
                     });
+                    const d = await resp.json();
+                    if (d.traits_added) totalTraitsAdded += d.traits_added;
                 }
 
                 if (fileInput.files && fileInput.files.length > 0) {
@@ -487,16 +841,20 @@
                     formData.append("file", fileInput.files[0]);
                     formData.append("persona", currentPersona);
 
-                    await fetch("http://localhost:8000/ingest", { method: "POST", body: formData });
+                    const resp = await fetch(`${API_BASE}/ingest`, { method: "POST", body: formData });
+                    const d = await resp.json();
+                    if (d.traits_added) totalTraitsAdded += d.traits_added;
                 }
 
-                statusEl.innerText = `Success! Neo4j graph & website data updated for '${currentPersona}'.`;
-                statusEl.className = "px-6 text-xs text-emerald-400 h-5";
+                await loadPersonaTraits(currentPersona);
+
+                statusEl.innerText = `Success! Knowledge graph updated and ${totalTraitsAdded} traits extracted for '${currentPersona}'.`;
+                statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
                 fileInput.value = "";
                 document.getElementById("socialProfileUrls").value = "";
             } catch (err) {
                 statusEl.innerText = "Error completing website scraping and training.";
-                statusEl.className = "px-6 text-xs text-rose-400 h-5";
+                statusEl.className = "px-6 text-xs text-rose-400 h-5 font-medium";
             }
         }
 
@@ -510,7 +868,7 @@
             
             const statusEl = document.getElementById("uploadStatus");
             statusEl.innerText = `File attached. Type your message and hit send.`;
-            statusEl.className = "px-6 text-xs text-indigo-400 h-5";
+            statusEl.className = "px-6 text-xs text-teal-400 h-5 font-medium";
         });
 
         function clearAttachment() {
@@ -532,6 +890,19 @@
             
             if (!message && !pendingAttachment) return;
 
+            let displayMessage = message;
+            if (pendingAttachment) {
+                displayMessage = message ? `${message} [Attached: ${pendingAttachment.name}]` : `[Shared file: ${pendingAttachment.name}]`;
+            }
+
+            const fileToSend = pendingAttachment;
+            input.value = "";
+            clearAttachment();
+
+            await triggerBackendMessage(displayMessage, fileToSend, isVoiceInput);
+        }
+
+        async function triggerBackendMessage(displayMessage, fileToSend = null, isVoiceInput = false) {
             let chats = getCurrentChats();
             let chat = chats.find(c => c.id === currentChatId);
             if (!chat) {
@@ -540,21 +911,14 @@
             }
 
             if (chat.messages.length === 0 && chat.title.includes("Chat")) {
-                chat.title = message.length > 20 ? message.substring(0, 20) + "..." : (pendingAttachment ? pendingAttachment.name : "Chat");
+                chat.title = displayMessage.length > 20 ? displayMessage.substring(0, 20) + "..." : "Chat";
             }
 
             if (!chat.messages) chat.messages = [];
 
-            let displayMessage = message;
-            if (pendingAttachment) {
-                displayMessage = message ? `${message} [Attached: ${pendingAttachment.name}]` : `[Shared file: ${pendingAttachment.name}]`;
-            }
+            const currentHistory = JSON.stringify(chat.messages);
 
             chat.messages.push({ sender: "user", text: displayMessage });
-            
-            const fileToSend = pendingAttachment;
-            input.value = "";
-            clearAttachment();
             
             saveToStorage();
             renderChatHistory();
@@ -563,9 +927,9 @@
             const chatWindow = document.getElementById("chatWindow");
             const loadingId = "loading_" + Date.now();
             chatWindow.innerHTML += `
-                <div id="${loadingId}" class="flex justify-start">
-                    <div class="bg-slate-800 border border-slate-700/60 rounded-2xl px-4 py-3 max-w-lg text-sm leading-relaxed text-slate-400 shadow-sm">
-                        Thinking...
+                <div id="${loadingId}" class="flex justify-start animate-fade-in">
+                    <div class="bg-slate-900/85 border border-teal-900/40 rounded-2xl px-4.5 py-3 max-w-lg text-sm leading-relaxed text-slate-400 shadow-lg flex items-center gap-2">
+                        <i class="fa-solid fa-circle-notch animate-spin text-teal-400 text-xs"></i> Thinking...
                     </div>
                 </div>
             `;
@@ -575,40 +939,79 @@
                 const formData = new FormData();
                 formData.append("message", displayMessage);
                 formData.append("persona", currentPersona);
+                formData.append("history", currentHistory);
                 
                 if (fileToSend) {
                     formData.append("file", fileToSend);
                 }
 
-                const response = await fetch("http://localhost:8000/chat", {
+                const response = await fetch(`${API_BASE}/chat`, {
                     method: "POST",
                     body: formData
                 });
 
-                const data = await response.json();
                 document.getElementById(loadingId)?.remove();
 
-                chat.messages.push({ sender: "bot", text: data.response });
+                if (!response.ok) {
+                    let errMsg = `The server returned an error (status ${response.status}).`;
+                    try {
+                        const errData = await response.json();
+                        if (errData && errData.detail) errMsg = errData.detail;
+                    } catch (parseErr) {
+                        // response wasn't JSON; keep the generic message above
+                    }
+                    chat.messages.push({ sender: "system", text: errMsg });
+                    saveToStorage();
+                    renderCurrentChatMessages();
+                    return;
+                }
+
+                chat.messages.push({ sender: "bot", text: "" });
+                const botMsgIndex = chat.messages.length - 1;
                 saveToStorage();
                 renderCurrentChatMessages();
 
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedText = "";
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    accumulatedText += chunk;
+                    chat.messages[botMsgIndex].text = accumulatedText;
+                    
+                    const bubbleEl = document.getElementById(`bot_msg_${botMsgIndex}`);
+                    if (bubbleEl) {
+                        bubbleEl.innerText = accumulatedText;
+                    }
+                    chatWindow.scrollTop = chatWindow.scrollHeight;
+                }
+
+                saveToStorage();
+
+                if (displayMessage.includes("[Scrape URL:")) {
+                    loadPersonaTraits(currentPersona);
+                }
+
                 if (isVoiceInput) {
-                    speakText(data.response);
+                    speakText(botMsgIndex);
                 }
 
             } catch (err) {
                 document.getElementById(loadingId)?.remove();
-                const errText = "Failed to reach backend server.";
-                chat.messages.push({ sender: "bot", text: errText });
+                const errText = "Failed to reach backend server. Is it running?";
+                chat.messages.push({ sender: "system", text: errText });
                 saveToStorage();
                 renderCurrentChatMessages();
-                if (isVoiceInput) speakText(errText);
             }
         }
 
         initPersonas();
         renderChatHistory();
         renderCurrentChatMessages();
+        loadPersonaTraits(currentPersona);
     </script>
 </body>
 </html>

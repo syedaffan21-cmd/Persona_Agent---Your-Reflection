@@ -64,4 +64,64 @@ class GraphDatabaseManager:
             print(f"Error fetching graph facts: {e}")
         return facts
 
+    def add_trait(self, entity: str, trait: str):
+        if not self.driver:
+            return
+        query = """
+        MERGE (e:Entity {name: $entity})
+        MERGE (t:Trait {name: $trait})
+        MERGE (e)-[:HAS_TRAIT]->(t)
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, entity=entity.strip(), trait=trait.strip())
+        except Exception as e:
+            print(f"Error adding trait: {e}")
+
+    def get_persona_traits(self, entity_name: str) -> list[str]:
+        if not self.driver:
+            return []
+        traits = []
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (e:Entity {name: $entity_name})-[:HAS_TRAIT]->(t:Trait)
+                RETURN t.name AS trait
+                LIMIT 25
+                """
+                result = session.run(query, entity_name=entity_name)
+                for record in result:
+                    traits.append(record['trait'])
+        except Exception as e:
+            print(f"Error fetching persona traits: {e}")
+        return traits
+
+    def delete_trait(self, entity: str, trait: str):
+        if not self.driver:
+            return
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (e:Entity {name: $entity})-[r:HAS_TRAIT]->(t:Trait)
+                WHERE toLower(t.name) = toLower($trait)
+                DELETE r
+                """
+                session.run(query, entity=entity.strip(), trait=trait.strip())
+        except Exception as e:
+            print(f"Error deleting trait: {e}")
+
+    def delete_persona_traits(self, entity_name: str):
+        if not self.driver:
+            return
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (e:Entity {name: $entity_name})-[r:HAS_TRAIT]->(t:Trait)
+                DELETE r
+                """
+                session.run(query, entity_name=entity_name)
+        except Exception as e:
+            print(f"Error deleting persona traits: {e}")
+
+
 graph_db = GraphDatabaseManager()

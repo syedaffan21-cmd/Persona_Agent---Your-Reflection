@@ -1,11 +1,8 @@
 import os
 import re
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 from qdrant_client.models import PointStruct
-from vector_db import client, COLLECTION_NAME, init_vector_db
-
-model = SentenceTransformer('all-MiniLM-L6-v2')
+from vector_db import client, COLLECTION_NAME, init_vector_db, embedding_model
 
 def extract_text_from_file(file_path: str) -> str:
     text = ""
@@ -39,7 +36,7 @@ def process_and_store_document(file_path: str = None, persona: str = "My Persona
     for i in range(0, len(words), 300):
         chunks.append(" ".join(words[i:i + 300]))
 
-    embeddings = model.encode(chunks).tolist()
+    embeddings = embedding_model.encode(chunks).tolist()
     
     source_name = os.path.basename(file_path) if file_path else f"{persona}_profile"
     
