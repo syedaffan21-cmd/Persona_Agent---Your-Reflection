@@ -238,6 +238,9 @@
         // (e.g. "https://your-app-name.onrender.com"). Leave as-is for local dev.
         const API_BASE = "https://persona-agent-your-reflection.onrender.com";
 
+        // Fish Audio TTS - the actual API key + voice id live server-side in
+        // main.py's /api/tts endpoint (as env vars), never in this file.
+
         let allPersonaChats = JSON.parse(localStorage.getItem("persona_chats_map")) || {
             "My Personal Twin": [
                 { id: Date.now(), title: "General Chat", pinned: false, messages: [] }
@@ -556,14 +559,45 @@
             }
         }
 
-        function speakText(index) {
+        async function speakWithFishAudio(text) {
+            // Calls our own backend, which holds the Fish Audio key server-side
+            // and proxies the request -- the browser never sees the key.
+            const resp = await fetch(`${API_BASE}/api/tts`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: text })
+            });
+            if (!resp.ok) throw new Error(`TTS returned ${resp.status}`);
+            const blob = await resp.blob();
+            return URL.createObjectURL(blob);
+        }
+
+        async function speakText(index) {
             let chats = getCurrentChats();
             let chat = chats.find(c => c.id === currentChatId);
             if (!chat || !chat.messages[index]) return;
-            
+
             const text = chat.messages[index].text;
+            const btn = document.getElementById(`speak-btn-${index}`);
+            const icon = btn ? btn.querySelector("i") : null;
+            const originalIconClass = icon ? icon.className : null;
+
+            try {
+                if (icon) icon.className = "fa-solid fa-spinner fa-spin text-xs";
+                const audioUrl = await speakWithFishAudio(text);
+                const audio = new Audio(audioUrl);
+                audio.play();
+                audio.onended = () => URL.revokeObjectURL(audioUrl);
+                if (icon) icon.className = originalIconClass;
+                return;
+            } catch (err) {
+                // Fish Audio call failed -- fall back to the browser's
+                // built-in voice so playback still works.
+                console.warn("Fish Audio TTS unavailable, falling back to browser voice:", err);
+                if (icon) icon.className = originalIconClass;
+            }
+
             if (!('speechSynthesis' in window)) return;
-            
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.rate = 1.0;
@@ -640,7 +674,7 @@
                             <div class="flex flex-col items-start gap-1">
                                 <div id="bot_msg_${index}" class="bg-slate-900/80 backdrop-blur-md border border-teal-900/40 rounded-2xl px-4.5 py-3 max-w-lg text-sm leading-relaxed text-slate-200 shadow-xl">${formattedText}</div>
                                 <div class="hidden group-hover:flex items-center gap-2 ml-2">
-                                    <button onclick="speakText(${index})" aria-label="Read Aloud" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Read Aloud">
+                                    <button id="speak-btn-${index}" onclick="speakText(${index})" aria-label="Read Aloud" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Read Aloud">
                                         <i class="fa-solid fa-volume-high text-xs"></i>
                                     </button>
                                     <button onclick="copyMessage(${index})" aria-label="Copy Message" class="text-slate-400 hover:text-teal-400 p-1 transition" title="Copy">

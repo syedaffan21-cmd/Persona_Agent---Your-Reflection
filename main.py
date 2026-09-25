@@ -12,7 +12,7 @@ if sys.platform == "win32":
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from openai import OpenAI, RateLimitError, APIStatusError, APIConnectionError, APITimeoutError
 from dotenv import load_dotenv
@@ -60,6 +60,15 @@ deepseek_client = OpenAI(
 )
 
 GRAPH_USER_NODE = os.getenv("GRAPH_USER_NODE", "Affan Syed")
+
+# Fish Audio TTS credentials -- kept server-side only (set these as real
+# environment variables on your host, e.g. Render's Environment tab).
+# Never hardcode the actual key/voice id here.
+FISH_AUDIO_API_KEY = os.getenv("FISH_AUDIO_API_KEY")
+FISH_AUDIO_VOICE_ID = os.getenv("FISH_AUDIO_VOICE_ID")
+
+class TTSRequest(BaseModel):
+    text: str
 
 class PersonaTrainRequest(BaseModel):
     name: str
@@ -992,6 +1001,30 @@ async def chat_with_persona(
     except Exception as e:
         print(f"Chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail="Something went wrong generating a response. Please try again.")
+
+@app.post("/api/tts")
+async def tts(req: TTSRequest):
+    if not FISH_AUDIO_API_KEY or not FISH_AUDIO_VOICE_ID:
+        raise HTTPException(status_code=500, detail="Fish Audio credentials not configured on the server.")
+    try:
+        async with httpx.AsyncClient() as fish_client:
+            resp = await fish_client.post(
+                "https://api.fish.audio/v1/tts",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {FISH_AUDIO_API_KEY}"
+                },
+                json={"text": req.text, "reference_id": FISH_AUDIO_VOICE_ID},
+                timeout=60
+            )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Fish Audio TTS returned {resp.status_code}")
+        return Response(content=resp.content, media_type="audio/mpeg")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"TTS endpoint error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate speech.")
 
 @app.get("/")
 def health_check():
