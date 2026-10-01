@@ -1,97 +1,133 @@
 # Persona Twin
 
-Build an AI "digital twin" of yourself (or anyone else) by feeding it your documents, chats, and social profiles. It learns your traits, facts, and speaking style, then talks back as you — in your own language and tone.
+Persona Twin is a chat app where you create AI "personas" — each one can be
+trained on your own writing, documents, or web links, and can even reply back
+using a cloned voice of a real person (with their consent) instead of plain text.
 
-## How it works
+Think of it as: **ChatGPT, but you can make several differently-trained
+characters, and give each one its own voice.**
 
-1. **Train** a persona by uploading documents (PDFs, text files, chat exports) or pointing it at a social profile URL.
-2. The backend extracts **facts** (stored in a Neo4j knowledge graph) and **personality traits** (stored per-persona), and keeps a **voice sample** of how that person actually writes/talks — prioritizing real chat messages and casual notes over formal documents, since those better reflect genuine speaking style.
-3. **Chat** with the persona. It answers using its own facts/traits/voice, retrieves relevant context via vector search (Qdrant), and can pull in live external data (GitHub, Twitter/X, Instagram) mid-conversation when you share a link.
+---
 
-## Features
+## ✨ What it can do
 
-- Multi-persona support — create and switch between multiple digital twins
-- Document ingestion: PDF, TXT, MD, images
-- Web scraping for context: GitHub profiles, Twitter/X (via saved session cookies), Instagram (profile + individual posts, including photos and captions)
-- Automatic trait extraction and deduplication (won't invent traits the source text doesn't support)
-- Persona traits are manually editable (add/remove) from the sidebar
-- Language-adaptive replies — mirrors the actual language/style the persona's creator uses (Hinglish, English, or otherwise), rather than a fixed hardcoded style
-- Voice input/output (speech-to-text and text-to-speech in the browser)
-- Chat history, per-chat pinning, editing, and renaming (stored locally in the browser)
-
-## Tech stack
-
-| Layer | Tech |
+| Feature | Description |
 |---|---|
-| Backend | FastAPI (Python) |
-| Knowledge graph | Neo4j Aura (facts, relationships) |
-| Vector search | Qdrant (embedded/local mode) |
-| Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) |
-| Chat model | OpenRouter (`openrouter/free`), via the OpenAI Python SDK |
-| Scraping | `httpx` + BeautifulSoup (GitHub, Instagram), Playwright/Chromium (Instagram fallback), `twifork` (Twitter/X, cookie-based) |
-| Frontend | Single-file HTML/CSS/JS, no build step |
+| 🧑‍🤝‍🧑 Multiple personas | Create as many named personas as you want, each with its own chat history |
+| 📚 Train a persona | Upload documents or paste web/social links so a persona "learns" a writing style |
+| 🗣️ Voice cloning | Give a persona its own spoken voice (via Fish Audio) — one persona's voice never bleeds into another's |
+| 🇮🇳 Hindi-friendly speech | Hinglish text (e.g. "kaise ho") is auto-converted to Hindi script before speaking, so it sounds natural instead of being read like English |
+| ⚡ Faster replays | Already-spoken audio is cached in your browser, so clicking "Read Aloud" twice doesn't call the API twice |
+| 🧠 Memory | Personas remember facts and traits using a knowledge graph + vector search |
 
-## Project structure
+---
+
+## 🧱 How it's built
 
 ```
-main.py            FastAPI app: all API endpoints, chat logic, scraping, trait extraction
-graph_db.py         Neo4j connection and fact/trait graph operations
-ingestion.py         Document parsing and vector embedding/storage
-vector_db.py        Qdrant client setup and shared embedding model
-index.html          Frontend (chat UI, persona/trait management)
-requirements.txt    Python dependencies
-Dockerfile           Container build (includes Playwright's Chromium)
+┌─────────────┐        ┌────────────────────┐        ┌────────────────┐
+│  index.html │ ─────▶ │  main.py (FastAPI)  │ ─────▶ │  Fish Audio    │ (voice)
+│  (Vercel)   │        │  (Render)            │ ─────▶ │  OpenRouter    │ (chat)
+└─────────────┘        │                      │ ─────▶ │  Neo4j Aura    │ (memory)
+                        └────────────────────┘ ─────▶ │  Qdrant (local)│ (search)
+                                                         └────────────────┘
 ```
 
-## Local setup
+- **Frontend** — a single `index.html` file, no build step needed.
+- **Backend** — `main.py`, a FastAPI server that handles chat, training, and voice.
+- **Neo4j** — stores persona facts/traits as a graph.
+- **Qdrant** — stores document text as searchable embeddings (runs locally, no account needed).
 
-**Requirements:** Python 3.11+, a Neo4j Aura instance (free tier works), an OpenRouter API key.
+---
+
+## 🚀 Getting started (run it on your own computer)
+
+### 1. Install dependencies
 
 ```bash
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS/Linux
-
 pip install -r requirements.txt
-playwright install chromium     # needed once, for Instagram scraping fallback
+playwright install --with-deps chromium
 ```
 
-Create a `.env` file in the project root:
+### 2. Set up your secret keys
 
-```
-NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
-NEO4J_USER=your-username
-NEO4J_PASSWORD=your-password
-GRAPH_USER_NODE=Your Name
-DEEPSEEK_API_KEY=sk-or-v1-your-openrouter-key
+```bash
+cp .env.example .env
 ```
 
-Run it:
+Open `.env` and fill in each value. `.env.example` has a comment above every
+line explaining where to get it. You'll need:
+
+- An **OpenRouter** API key (for chat replies) → `DEEPSEEK_API_KEY`
+- A **Fish Audio** API key (for voice cloning) → `FISH_AUDIO_API_KEY`
+- A **Neo4j Aura** free database URI + password → `NEO4J_URI`, `NEO4J_PASSWORD`
+
+> ⚠️ Never commit your real `.env` file. It's already in `.gitignore`.
+
+### 3. Start the backend
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Then open `index.html` directly in a browser. `API_BASE` near the top of its `<script>` block defaults to `http://localhost:8000` for local dev.
+It will run at `http://127.0.0.1:8000`.
 
-### Running with Docker instead
+### 4. Open the frontend
+
+Open `index.html` in your browser (or right-click → "Open with Live Server"
+in VS Code). Make sure the `API_BASE` variable near the top of the `<script>`
+tag in `index.html` points to your backend's address.
+
+---
+
+## 🐳 Running with Docker instead
 
 ```bash
 docker build -t persona-twin-backend .
-docker run -p 8000:8000 --env-file .env persona-twin-backend
+docker run -p 8000:8000 --env-file .env -v "${PWD}/data:/app/data" persona-twin-backend
 ```
 
-## Deploying
+The `-v` part matters: it saves your data (like trained persona voices)
+*outside* the container, so you don't lose it every time you restart.
 
-This app needs a real persistent server for the backend (embedded vector DB, headless browser scraping, streaming chat responses) — it can't run on serverless platforms like Vercel. The frontend, being a single static HTML file, deploys anywhere trivially.
+---
 
-- **Backend → [Render](https://render.com)**: connect this repo, let it build from the included `Dockerfile`, and add your `.env` values under the Environment tab. For Twitter/X scraping to keep working, add `twitter_cookies.json` as a **Secret File** in Render rather than committing it.
-- **Frontend → [Vercel](https://vercel.com)**: import this repo, set the framework preset to "Other" with no build command, and deploy. Before deploying, update `API_BASE` in `index.html` to your live Render URL.
+ 
 
-## Known limitations
+---
 
-- **OpenRouter free tier**: `openrouter/free` is capped at 50 requests/day (1000/day with $10+ credit added to your OpenRouter account). This is an account-wide limit — creating new accounts does not reset it. For real usage, add credits or switch to a paid model.
-- **No persistent storage on free hosting tiers**: persona traits, voice samples, and the vector database currently live in local files/folders. Without a paid persistent disk, this resets on every redeploy or restart. Fine for testing; for a durable production setup, this data should move to a hosted database.
-- **LinkedIn scraping is not supported.** LinkedIn aggressively blocks unauthenticated access with no public API equivalent; reliably scraping it would require using real login credentials programmatically, which risks the account and isn't something this project attempts.
-- **Instagram/Twitter scraping relies on undocumented or session-based access**, not official APIs, so it can break or get rate-limited without notice.
-- **No authentication on the API.** Anything reachable at the backend's URL can chat, train, or delete personas. Fine for personal/local use; add an access-key check before exposing this publicly to strangers.
+## 🔑 Environment variables
+
+| Variable | What it's for |
+|---|---|
+| `DEEPSEEK_API_KEY` | OpenRouter key — powers chat replies and Hindi text conversion |
+| `FISH_AUDIO_API_KEY` | Powers voice cloning and text-to-speech |
+| `FISH_AUDIO_TTS_MODEL` | Which Fish Audio voice quality tier to use (free or paid) |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Connects to your Neo4j graph database |
+| `GRAPH_USER_NODE` | The name of your default persona |
+| `TWITTER_COOKIES_PATH` | Lets the app read a Twitter/X profile when training a persona from it |
+
+Full details and sign-up links are in `.env.example`.
+
+---
+
+## 🔒 Please read before pushing to GitHub
+
+- `twitter_cookies.json` and `raw_cookies.json` contain a **real, active login
+  session** if you've filled them in — treat them exactly like a password.
+  They're already excluded by `.gitignore`, but double-check before your
+  first `git push` that they weren't accidentally staged.
+- Only clone someone's voice if it's **your own voice**, or someone else's
+  voice **with their clear permission**. This app doesn't block cloning any
+  name you type in — it relies on you using it responsibly.
+
+---
+
+## 🧯 Common issues
+
+| Problem | Likely cause |
+|---|---|
+| Voice playback fails with a `402` error | Your Fish Audio account has no API credit — top up at `fish.audio/app/developers` |
+| Persona voice is gone after restarting | Local data folder wasn't saved — use the `-v` flag shown above, or a Render Persistent Disk |
+| "Failed to connect to Neo4j" in logs | Double check `NEO4J_URI` / `NEO4J_PASSWORD` in your `.env` |
+| Hinglish sounds like English when spoken | Should auto-convert to Hindi script — if it doesn't, check the backend logs for a transliteration error |
