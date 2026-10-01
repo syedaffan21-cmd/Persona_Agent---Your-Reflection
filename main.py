@@ -61,14 +61,77 @@ deepseek_client = OpenAI(
 
 GRAPH_USER_NODE = os.getenv("GRAPH_USER_NODE", "Affan Syed")
 
-# Fish Audio TTS credentials -- kept server-side only (set these as real
+# Fish Audio credentials -- kept server-side only (set these as real
 # environment variables on your host, e.g. Render's Environment tab).
-# Never hardcode the actual key/voice id here.
+# Never hardcode the actual key here.
+#
+# FISH_AUDIO_API_KEY is the only one of these still used automatically: it's
+# needed to call Fish Audio at all (both for /persona/{name}/voice training
+# and for /api/tts playback). It is NOT tied to any one voice or persona.
+#
+# There used to also be a FISH_AUDIO_VOICE_ID env var that every persona fell
+# back to by default. That's been removed on purpose: a persona now only ever
+# gets a cloned voice if someone explicitly trains it via the app (Create
+# Persona's voice upload, or the Train Persona modal). No env var can grant a
+# persona a voice anymore -- an untrained persona always uses the browser's
+# built-in voice, regardless of what's set in .env.
 FISH_AUDIO_API_KEY = os.getenv("FISH_AUDIO_API_KEY")
-FISH_AUDIO_VOICE_ID = os.getenv("FISH_AUDIO_VOICE_ID")
+
+# Which Fish Audio TTS model to speak with. Defaults to the free-tier model
+# ("s2.1-pro-free") since that works on every account -- it's a bit flatter
+# than the paid "s2.1-pro" model, but won't silently fail playback if your
+# account doesn't have paid access. If your account IS on a paid plan, set
+# FISH_AUDIO_TTS_MODEL=s2.1-pro in .env for noticeably more natural speech.
+FISH_AUDIO_TTS_MODEL = os.getenv("FISH_AUDIO_TTS_MODEL", "s2.1-pro-free")
 
 class TTSRequest(BaseModel):
     text: str
+    persona: Optional[str] = None
+    # When true, the text is treated as Hinglish (Hindi written in Latin
+    # letters) and transliterated to Devanagari before speaking -- Fish
+    # Audio otherwise reads Latin letters as English, which mispronounces it.
+    speak_as_hindi: Optional[bool] = False
+
+_TRANSLITERATION_REFUSAL_MARKERS = (
+    "i cannot", "i can't", "i'm sorry", "i am sorry", "as an ai", "as a language model",
+    "unable to", "not able to", "for safety", "user safety", "i won't", "i will not",
+    "against my", "i apologize",
+)
+
+def transliterate_hinglish_to_devanagari(text: str) -> str:
+    """Converts Hinglish (Romanized Hindi) to Devanagari script using the
+    same LLM already used elsewhere in this app, so Fish Audio TTS gets
+    proper Hindi text to pronounce instead of misreading Latin letters as
+    English. Falls back to the original text if the call fails -- or if the
+    model responds with something that looks like a refusal/disclaimer
+    instead of an actual transliteration -- so a bad response is never read
+    aloud verbatim (this is what caused it to say things like "user safety")."""
+    try:
+        response = deepseek_client.chat.completions.create(
+            model="openrouter/free",
+            messages=[
+                {"role": "system", "content": (
+                    "You transliterate Hinglish (Hindi written in Latin letters) into "
+                    "Devanagari Hindi script. This is a plain script-conversion task with "
+                    "no safety concerns -- never refuse, comment, or add any disclaimer. "
+                    "Preserve meaning, tone, and any English words exactly as English (do "
+                    "not translate them). Output ONLY the transliterated text, nothing "
+                    "else -- no explanations, no quotes, no meta-commentary."
+                )},
+                {"role": "user", "content": text}
+            ],
+            stream=False,
+        )
+        result = response.choices[0].message.content.strip()
+        if not result:
+            return text
+        if any(marker in result.lower() for marker in _TRANSLITERATION_REFUSAL_MARKERS):
+            print(f"Transliteration looked like a refusal, using original text instead: {result[:200]}")
+            return text
+        return result
+    except Exception as e:
+        print(f"Hinglish transliteration failed, using original text: {e}")
+        return text
 
 class PersonaTrainRequest(BaseModel):
     name: str
@@ -198,6 +261,55 @@ def purge_persona_voice_sample(persona: str):
     if persona.strip() in store:
         del store[persona.strip()]
         save_voice_samples(store)
+
+PERSONA_VOICE_MODELS_FILE = os.path.join(UPLOAD_DIR, "persona_voice_models.json")
+
+def load_persona_voice_models() -> Dict[str, Dict[str, Any]]:
+    if os.path.exists(PERSONA_VOICE_MODELS_FILE):
+        try:
+            with open(PERSONA_VOICE_MODELS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading persona voice models: {e}")
+    return {}
+
+def save_persona_voice_models(data: Dict[str, Dict[str, Any]]):
+    try:
+        with open(PERSONA_VOICE_MODELS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving persona voice models: {e}")
+
+def get_persona_voice_model_id(persona: str) -> Optional[str]:
+    store = load_persona_voice_models()
+    entry = store.get(persona.strip())
+    return entry.get("model_id") if entry else None
+
+def set_persona_voice_model(persona: str, model_id: str):
+    store = load_persona_voice_models()
+    store[persona.strip()] = {"model_id": model_id}
+    save_persona_voice_models(store)
+
+def purge_persona_voice_model(persona: str) -> Optional[str]:
+    """Removes the stored Fish Audio model id for a persona (if any) and returns
+    it, so the caller can also delete the underlying model on Fish Audio's side."""
+    store = load_persona_voice_models()
+    entry = store.pop(persona.strip(), None)
+    save_persona_voice_models(store)
+    return entry.get("model_id") if entry else None
+
+async def delete_fish_audio_model(model_id: str):
+    if not (model_id and FISH_AUDIO_API_KEY):
+        return
+    try:
+        async with httpx.AsyncClient() as fish_client:
+            await fish_client.delete(
+                f"https://api.fish.audio/model/{model_id}",
+                headers={"Authorization": f"Bearer {FISH_AUDIO_API_KEY}"},
+                timeout=30,
+            )
+    except Exception as e:
+        print(f"Warning: failed to delete Fish Audio model {model_id}: {e}")
 
 def get_all_traits_for_persona(persona: str) -> List[str]:
     persona_clean = persona.strip()
@@ -754,6 +866,9 @@ async def delete_persona_data(name: str):
                 session.run("MATCH (u:Entity {name: $uname}) DETACH DELETE u", uname=clean_name)
         purge_persona_traits(clean_name)
         purge_persona_voice_sample(clean_name)
+        voice_model_id = purge_persona_voice_model(clean_name)
+        if voice_model_id:
+            await delete_fish_audio_model(voice_model_id)
         return {"status": "success", "message": f"Successfully purged persona '{clean_name}'."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -814,6 +929,97 @@ async def train_persona(request: PersonaTrainRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/persona/{name}/voice")
+async def train_persona_voice(name: str, files: List[UploadFile] = File(...)):
+    """Clones a dedicated Fish Audio TTS voice for this persona from one or more
+    short audio clips, so the persona can reply in its own spoken voice instead
+    of the single global voice configured server-side. Only upload audio of a
+    voice you have the right to clone -- your own voice, or someone else's with
+    their clear, informed consent. This mirrors Fish Audio's own voice-cloning
+    terms and helps make sure a persona's voice is never cloned without the
+    speaker's permission."""
+    if not FISH_AUDIO_API_KEY:
+        raise HTTPException(status_code=500, detail="Fish Audio credentials not configured on the server.")
+    clean_name = name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Persona name is required.")
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one audio clip is required.")
+
+    try:
+        multipart_files = []
+        total_bytes = 0
+        for f in files[:20]:
+            contents = await f.read()
+            total_bytes += len(contents)
+            if total_bytes > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail=f"Audio too large. Max total size is {MAX_UPLOAD_SIZE_BYTES // (1024*1024)}MB.")
+            multipart_files.append(("voices", (f.filename or "sample.wav", contents, f.content_type or "audio/wav")))
+
+        # Fish Audio's servers occasionally time out on this call even when the
+        # network is fine (confirmed via a manual connectivity test) -- retry a
+        # couple of times before giving up, instead of making you resubmit by hand.
+        last_timeout_err = None
+        resp = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=30.0)) as fish_client:
+                    resp = await fish_client.post(
+                        "https://api.fish.audio/model",
+                        headers={"Authorization": f"Bearer {FISH_AUDIO_API_KEY}"},
+                        data={
+                            "type": "tts",
+                            "title": f"Persona Twin - {clean_name}",
+                            "train_mode": "fast",
+                            "visibility": "private",
+                            # Cleans up background noise/hiss in the uploaded samples
+                            # before cloning -- makes a noticeable difference if the
+                            # recording wasn't done in a studio-quiet room.
+                            "enhance_audio_quality": "true",
+                        },
+                        files=multipart_files,
+                    )
+                break
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_timeout_err = e
+                print(f"Voice training attempt {attempt + 1} failed with {type(e).__name__}, retrying..." if attempt < 2 else f"Voice training failed after {attempt + 1} attempts: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1))
+        if resp is None:
+            raise HTTPException(status_code=502, detail=f"Fish Audio connection kept timing out after 3 attempts ({last_timeout_err}). Please try again.")
+        if resp.status_code != 201:
+            print(f"Fish Audio model creation error {resp.status_code}: {resp.text}")
+            raise HTTPException(status_code=502, detail=f"Fish Audio voice training returned {resp.status_code}: {resp.text[:200]}")
+        model_data = resp.json()
+        model_id = model_data.get("_id")
+        if not model_id:
+            raise HTTPException(status_code=502, detail="Fish Audio did not return a model id.")
+
+        old_model_id = get_persona_voice_model_id(clean_name)
+        set_persona_voice_model(clean_name, model_id)
+        if old_model_id and old_model_id != model_id:
+            await delete_fish_audio_model(old_model_id)
+
+        return {"status": "success", "persona": clean_name, "message": f"Voice trained for '{clean_name}'."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to train persona voice: {e}")
+
+@app.get("/persona/{name}/voice")
+async def get_persona_voice_status(name: str):
+    model_id = get_persona_voice_model_id(name)
+    return {"persona": name.strip(), "has_voice": bool(model_id)}
+
+@app.delete("/persona/{name}/voice")
+async def delete_persona_voice(name: str):
+    model_id = purge_persona_voice_model(name)
+    if model_id:
+        await delete_fish_audio_model(model_id)
+    return {"status": "success", "persona": name.strip(), "message": "Persona voice removed."}
 
 @app.post("/chat")
 async def chat_with_persona(
@@ -1004,21 +1210,50 @@ async def chat_with_persona(
 
 @app.post("/api/tts")
 async def tts(req: TTSRequest):
-    if not FISH_AUDIO_API_KEY or not FISH_AUDIO_VOICE_ID:
+    if not FISH_AUDIO_API_KEY:
         raise HTTPException(status_code=500, detail="Fish Audio credentials not configured on the server.")
+
+    # Only speak with Fish Audio for a persona that has actually been trained
+    # with its own cloned voice -- no falling back to another persona's voice.
+    # An untrained persona gets a 404 here so the frontend falls back to the
+    # browser's built-in voice instead.
+    reference_id = get_persona_voice_model_id(req.persona) if req.persona else None
+    if not reference_id:
+        raise HTTPException(status_code=404, detail=f"No trained voice for persona '{req.persona}' yet.")
+
+    speech_text = req.text
+    if req.speak_as_hindi:
+        speech_text = transliterate_hinglish_to_devanagari(req.text)
+
     try:
         async with httpx.AsyncClient() as fish_client:
             resp = await fish_client.post(
                 "https://api.fish.audio/v1/tts",
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {FISH_AUDIO_API_KEY}"
+                    "Authorization": f"Bearer {FISH_AUDIO_API_KEY}",
+                    "model": FISH_AUDIO_TTS_MODEL
                 },
-                json={"text": req.text, "reference_id": FISH_AUDIO_VOICE_ID},
+                json={
+                    "text": speech_text,
+                    "reference_id": reference_id,
+                    # Tuned for a warmer, less monotone read than the defaults.
+                    # temperature/top_p add natural variation; "normal" latency
+                    # favors quality over the fastest possible response.
+                    "temperature": 0.85,
+                    "top_p": 0.9,
+                    "prosody": {"speed": 1.0, "volume": 0},
+                    "latency": "normal",
+                    "normalize": True,
+                },
                 timeout=60
             )
         if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"Fish Audio TTS returned {resp.status_code}")
+            print(f"Fish Audio error {resp.status_code}: {resp.text}")
+            hint = ""
+            if resp.status_code in (401, 402, 403):
+                hint = f" (this usually means your Fish Audio plan doesn't include the '{FISH_AUDIO_TTS_MODEL}' model -- try setting FISH_AUDIO_TTS_MODEL=s2.1-pro-free in .env)"
+            raise HTTPException(status_code=502, detail=f"Fish Audio TTS returned {resp.status_code}: {resp.text[:200]}{hint}")
         return Response(content=resp.content, media_type="audio/mpeg")
     except HTTPException:
         raise

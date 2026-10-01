@@ -201,6 +201,11 @@
                     <label for="newPersonaName" class="block text-xs font-semibold text-slate-400 mb-1">Persona Name</label>
                     <input type="text" id="newPersonaName" placeholder="e.g., Alex, Jordan" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition">
                 </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Voice Sample (optional)</label>
+                    <p class="text-[11px] text-slate-500 mb-1.5 leading-snug">For a natural-sounding clone, upload 3–5 clear clips (60–70s each) in a quiet room, ideally with some variety in tone/emotion — one short flat clip tends to sound robotic. Only use a voice you have the right to clone — your own, or someone else's with their clear consent.</p>
+                    <input type="file" id="newPersonaVoiceFile" accept="audio/*" multiple class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2 text-xs text-slate-300 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-600 file:text-white hover:file:bg-teal-500 transition">
+                </div>
             </div>
 
             <div class="flex justify-end gap-2 pt-2">
@@ -224,6 +229,18 @@
                     <label for="socialProfileUrls" class="block text-xs font-semibold text-slate-400 mb-1">Website Links to Scrape (comma/space separated)</label>
                     <textarea id="socialProfileUrls" rows="3" placeholder="https://example.com/bio, https://github.com/username" class="w-full bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-teal-500 transition"></textarea>
                 </div>
+
+                <div class="border-t border-teal-900/30 pt-3">
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-400">Voice</label>
+                        <span id="trainModalVoiceStatus" class="text-[11px] text-slate-500">Checking...</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mb-1.5 leading-snug">Add or replace this persona's spoken voice. For best results upload 3–5 clear clips (60–70s each, quiet room, some variety in tone) rather than one short clip. Only use a voice you have the right to clone — your own, or someone else's with their clear consent.</p>
+                    <div class="flex items-center gap-2">
+                        <input type="file" id="trainVoiceFile" accept="audio/*" multiple class="flex-1 bg-slate-950 border border-teal-900/40 rounded-xl px-3 py-2 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-600 file:text-white hover:file:bg-teal-500 transition">
+                        <button onclick="removePersonaVoice()" id="removeVoiceBtn" class="hidden shrink-0 bg-slate-800 hover:bg-rose-950/40 border border-teal-900/40 hover:border-rose-800/60 text-slate-400 hover:text-rose-400 px-3 py-2 rounded-xl text-xs transition" title="Remove trained voice">Remove</button>
+                    </div>
+                </div>
             </div>
 
             <div class="flex justify-end gap-2 pt-2">
@@ -236,7 +253,7 @@
     <script>
         // Change this one line to your deployed backend URL after you deploy it
         // (e.g. "https://your-app-name.onrender.com"). Leave as-is for local dev.
-        const API_BASE = "https://persona-agent-your-reflection.onrender.com";
+       const API_BASE = "http://127.0.0.1:8001";
 
         // Fish Audio TTS - the actual API key + voice id live server-side in
         // main.py's /api/tts endpoint (as env vars), never in this file.
@@ -559,17 +576,101 @@
             }
         }
 
+        // --- TTS audio cache -------------------------------------------------
+        // Checked first on every Read Aloud click. Two layers: an in-memory map
+        // (instant replays) and the browser Cache Storage (survives page reloads).
+        // Keyed by persona + text, so a different persona's voice never collides.
+        const ttsMemCache = new Map();
+        const TTS_CACHE_NAME = "persona-twin-tts-v1";
+
+        // Persisted toggle: when on, Hinglish text is transliterated to
+        // Devanagari server-side before speaking, so pronunciation is natural
+        // Always on: Hinglish is transliterated to Devanagari before every
+        // Read Aloud call, so Fish Audio pronounces it as Hindi instead of
+        // misreading the Latin letters as English.
+        const hinglishMode = true;
+
+        async function ttsCacheKey(persona, text, asHindi) {
+            const data = new TextEncoder().encode(text);
+            const buf = await crypto.subtle.digest("SHA-256", data);
+            const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+            return `/tts-cache/${encodeURIComponent(persona)}/${asHindi ? "hi" : "raw"}/${hash}`;
+        }
+
+        async function clearTtsCacheForPersona(persona) {
+            const prefix = `/tts-cache/${encodeURIComponent(persona)}/`;
+            for (const [key, url] of ttsMemCache) {
+                if (key.startsWith(prefix)) { URL.revokeObjectURL(url); ttsMemCache.delete(key); }
+            }
+            try {
+                if ("caches" in window) {
+                    const cache = await caches.open(TTS_CACHE_NAME);
+                    for (const req of await cache.keys()) {
+                        if (new URL(req.url).pathname.startsWith(prefix)) await cache.delete(req);
+                    }
+                }
+            } catch (e) { console.warn("TTS cache clear failed:", e); }
+        }
+
         async function speakWithFishAudio(text) {
-            // Calls our own backend, which holds the Fish Audio key server-side
-            // and proxies the request -- the browser never sees the key.
+            const persona = currentPersona;
+            const key = await ttsCacheKey(persona, text, hinglishMode);
+
+            // 1) memory cache
+            if (ttsMemCache.has(key)) return ttsMemCache.get(key);
+
+            // 2) persistent browser cache
+            try {
+                if ("caches" in window) {
+                    const cache = await caches.open(TTS_CACHE_NAME);
+                    const hit = await cache.match(key);
+                    if (hit) {
+                        const url = URL.createObjectURL(await hit.blob());
+                        ttsMemCache.set(key, url);
+                        return url;
+                    }
+                }
+            } catch (e) { console.warn("TTS cache read failed:", e); }
+
+            // 3) cache miss -> call the API (backend holds the Fish Audio key,
+            // picks this persona's own trained voice, and transliterates to
+            // Devanagari first if Hinglish mode is on).
             const resp = await fetch(`${API_BASE}/api/tts`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: text })
+                body: JSON.stringify({ text: text, persona: persona, speak_as_hindi: hinglishMode })
             });
-            if (!resp.ok) throw new Error(`TTS returned ${resp.status}`);
+            if (!resp.ok) {
+                const errBody = await resp.json().catch(() => ({}));
+                throw new Error(errBody.detail || `TTS returned ${resp.status}`);
+            }
             const blob = await resp.blob();
-            return URL.createObjectURL(blob);
+
+            // Store for next time (only successful cloned-voice audio gets cached).
+            try {
+                if ("caches" in window) {
+                    const cache = await caches.open(TTS_CACHE_NAME);
+                    await cache.put(key, new Response(blob.slice(0, blob.size, blob.type)));
+                }
+            } catch (e) { console.warn("TTS cache write failed:", e); }
+
+            const url = URL.createObjectURL(blob);
+            ttsMemCache.set(key, url);
+            return url;
+        }
+
+        function showTtsToast(message) {
+            let toast = document.getElementById("ttsToast");
+            if (!toast) {
+                toast = document.createElement("div");
+                toast.id = "ttsToast";
+                toast.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:9999;max-width:320px;font-size:12px;line-height:1.4;padding:10px 14px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.35);background:#7f1d1d;color:#fecaca;";
+                document.body.appendChild(toast);
+            }
+            toast.innerText = message;
+            toast.style.display = "block";
+            clearTimeout(toast._hideTimeout);
+            toast._hideTimeout = setTimeout(() => { toast.style.display = "none"; }, 8000);
         }
 
         async function speakText(index) {
@@ -587,13 +688,15 @@
                 const audioUrl = await speakWithFishAudio(text);
                 const audio = new Audio(audioUrl);
                 audio.play();
-                audio.onended = () => URL.revokeObjectURL(audioUrl);
                 if (icon) icon.className = originalIconClass;
                 return;
             } catch (err) {
                 // Fish Audio call failed -- fall back to the browser's
-                // built-in voice so playback still works.
+                // built-in voice so playback still works, but surface the
+                // real reason (both on-screen and in the console) instead of
+                // failing silently.
                 console.warn("Fish Audio TTS unavailable, falling back to browser voice:", err);
+                showTtsToast(`Cloned voice unavailable (${err.message}) -- using browser voice instead.`);
                 if (icon) icon.className = originalIconClass;
             }
 
@@ -816,6 +919,59 @@
         function openTrainModal() {
             document.getElementById("trainModalPersonaName").innerText = currentPersona;
             document.getElementById("trainModal").classList.remove("hidden");
+            document.getElementById("trainVoiceFile").value = "";
+            loadPersonaVoiceStatus(currentPersona);
+        }
+
+        async function loadPersonaVoiceStatus(personaName) {
+            const statusEl = document.getElementById("trainModalVoiceStatus");
+            const removeBtn = document.getElementById("removeVoiceBtn");
+            statusEl.innerText = "Checking...";
+            removeBtn.classList.add("hidden");
+            try {
+                const res = await fetch(`${API_BASE}/persona/${encodeURIComponent(personaName)}/voice`);
+                if (!res.ok) throw new Error("status check failed");
+                const data = await res.json();
+                if (data.has_voice) {
+                    statusEl.innerText = "Voice trained ✓";
+                    statusEl.className = "text-[11px] text-teal-400";
+                    removeBtn.classList.remove("hidden");
+                } else {
+                    statusEl.innerText = "No voice trained yet";
+                    statusEl.className = "text-[11px] text-slate-500";
+                }
+            } catch (err) {
+                statusEl.innerText = "";
+            }
+        }
+
+        async function uploadPersonaVoiceFile(personaName, fileOrFiles) {
+            const files = fileOrFiles instanceof FileList ? Array.from(fileOrFiles)
+                : Array.isArray(fileOrFiles) ? fileOrFiles
+                : [fileOrFiles];
+            const formData = new FormData();
+            for (const f of files) formData.append("files", f);
+            const resp = await fetch(`${API_BASE}/persona/${encodeURIComponent(personaName)}/voice`, {
+                method: "POST",
+                body: formData
+            });
+            if (!resp.ok) {
+                const errBody = await resp.json().catch(() => ({}));
+                throw new Error(errBody.detail || `Voice training returned ${resp.status}`);
+            }
+            await clearTtsCacheForPersona(personaName);
+            return resp.json();
+        }
+
+        async function removePersonaVoice() {
+            if (!confirm(`Remove the trained voice for '${currentPersona}'? Replies will fall back to the default voice.`)) return;
+            try {
+                await fetch(`${API_BASE}/persona/${encodeURIComponent(currentPersona)}/voice`, { method: "DELETE" });
+                await clearTtsCacheForPersona(currentPersona);
+                await loadPersonaVoiceStatus(currentPersona);
+            } catch (err) {
+                console.warn("Failed to remove persona voice:", err);
+            }
         }
 
         function closeTrainModal() {
@@ -825,6 +981,8 @@
         async function saveNewPersona() {
             const name = document.getElementById("newPersonaName").value.trim();
             if (!name) return alert("Please enter a persona name.");
+            const voiceFileInput = document.getElementById("newPersonaVoiceFile");
+            const voiceFile = voiceFileInput.files && voiceFileInput.files.length > 0 ? voiceFileInput.files : null;
 
             closePersonaModal();
             if (!savedPersonas.includes(name)) {
@@ -845,26 +1003,44 @@
             loadPersonaTraits(currentPersona);
 
             const statusEl = document.getElementById("uploadStatus");
-            statusEl.innerText = `Persona '${name}' created successfully.`;
-            statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+            if (voiceFile) {
+                statusEl.innerText = `Persona '${name}' created. Training voice...`;
+                statusEl.className = "px-6 text-xs text-teal-400 h-5 font-medium";
+                try {
+                    await uploadPersonaVoiceFile(name, voiceFile);
+                    statusEl.innerText = `Persona '${name}' created with a trained voice.`;
+                    statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+                } catch (err) {
+                    statusEl.innerText = `Persona '${name}' created, but voice training failed: ${err.message}`;
+                    statusEl.className = "px-6 text-xs text-rose-400 h-5 font-medium";
+                }
+                voiceFileInput.value = "";
+            } else {
+                statusEl.innerText = `Persona '${name}' created successfully.`;
+                statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+            }
         }
 
         async function submitPersonaTraining() {
             const fileInput = document.getElementById("trainFileInput");
+            const voiceFileInput = document.getElementById("trainVoiceFile");
             const socialUrlsText = document.getElementById("socialProfileUrls").value.trim();
             const socialUrls = socialUrlsText ? socialUrlsText.split(/[\s,]+/).filter(url => url.length > 0) : [];
+            const trainingPersona = currentPersona;
+            const voiceFile = voiceFileInput.files && voiceFileInput.files.length > 0 ? voiceFileInput.files : null;
 
             closeTrainModal();
             const statusEl = document.getElementById("uploadStatus");
-            statusEl.innerText = `Training persona '${currentPersona}' (scraping web links & extracting traits)...`;
+            statusEl.innerText = `Training persona '${trainingPersona}' (scraping web links & extracting traits)...`;
 
+            let voiceError = null;
             try {
                 let totalTraitsAdded = 0;
                 if (socialUrls.length > 0) {
                     const resp = await fetch(`${API_BASE}/train-persona`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: currentPersona, social_urls: socialUrls })
+                        body: JSON.stringify({ name: trainingPersona, social_urls: socialUrls })
                     });
                     const d = await resp.json();
                     if (d.traits_added) totalTraitsAdded += d.traits_added;
@@ -873,18 +1049,32 @@
                 if (fileInput.files && fileInput.files.length > 0) {
                     const formData = new FormData();
                     formData.append("file", fileInput.files[0]);
-                    formData.append("persona", currentPersona);
+                    formData.append("persona", trainingPersona);
 
                     const resp = await fetch(`${API_BASE}/ingest`, { method: "POST", body: formData });
                     const d = await resp.json();
                     if (d.traits_added) totalTraitsAdded += d.traits_added;
                 }
 
-                await loadPersonaTraits(currentPersona);
+                if (voiceFile) {
+                    try {
+                        await uploadPersonaVoiceFile(trainingPersona, voiceFile);
+                    } catch (err) {
+                        voiceError = err.message;
+                    }
+                }
 
-                statusEl.innerText = `Success! Knowledge graph updated and ${totalTraitsAdded} traits extracted for '${currentPersona}'.`;
-                statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+                await loadPersonaTraits(trainingPersona);
+
+                if (voiceError) {
+                    statusEl.innerText = `Traits updated (${totalTraitsAdded} added) for '${trainingPersona}', but voice training failed: ${voiceError}`;
+                    statusEl.className = "px-6 text-xs text-rose-400 h-5 font-medium";
+                } else {
+                    statusEl.innerText = `Success! Knowledge graph updated and ${totalTraitsAdded} traits extracted for '${trainingPersona}'${voiceFile ? ", voice trained" : ""}.`;
+                    statusEl.className = "px-6 text-xs text-emerald-400 h-5 font-medium";
+                }
                 fileInput.value = "";
+                voiceFileInput.value = "";
                 document.getElementById("socialProfileUrls").value = "";
             } catch (err) {
                 statusEl.innerText = "Error completing website scraping and training.";
