@@ -253,7 +253,7 @@
     <script>
         // Change this one line to your deployed backend URL after you deploy it
         // (e.g. "https://your-app-name.onrender.com"). Leave as-is for local dev.
-       const API_BASE = "http://127.0.0.1:8001";
+       const API_BASE = "https://persona-agent-your-reflection.onrender.com";
 
         // Fish Audio TTS - the actual API key + voice id live server-side in
         // main.py's /api/tts endpoint (as env vars), never in this file.
@@ -581,7 +581,7 @@
         // (instant replays) and the browser Cache Storage (survives page reloads).
         // Keyed by persona + text, so a different persona's voice never collides.
         const ttsMemCache = new Map();
-        const TTS_CACHE_NAME = "persona-twin-tts-v1";
+        const TTS_CACHE_NAME = "persona-twin-tts-v2"; // bumped to drop any clips cached before the transliteration-refusal fix
 
         // Persisted toggle: when on, Hinglish text is transliterated to
         // Devanagari server-side before speaking, so pronunciation is natural
